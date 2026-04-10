@@ -119,6 +119,36 @@ export async function fetchRiderProfile(riderId: string): Promise<RiderProfile> 
   return data;
 }
 
+export async function findUserByPhone(phone: string) {
+  const client = ensureSupabase();
+  const { data, error } = await client
+    .from("users")
+    .select("id, name, phone, role")
+    .eq("phone", phone)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data as { id: string; name: string; phone: string; role?: string | null } | null;
+}
+
+export async function storeRiderOtp(phone: string, otp: string, expiresAt: string) {
+  const client = ensureSupabase();
+  const { error } = await client
+    .from("riders")
+    .update({
+      otp,
+      otp_expires_at: expiresAt,
+    })
+    .eq("phone", phone);
+
+  if (error) {
+    throw error;
+  }
+}
+
 export async function fetchEarnings(riderId: string, offset = 0, limit = 20): Promise<EarningsData> {
   const client = ensureSupabase();
   const [riderResult, ordersResult] = await Promise.all([

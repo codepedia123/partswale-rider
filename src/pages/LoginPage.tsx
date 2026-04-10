@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { sendOtp, verifyOtp } from "../lib/api";
+import { verifyOtp } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { OtpInput } from "../components/shared/OtpInput";
 import { getErrorMessage } from "../lib/errorHandling";
+import { findUserByPhone, storeRiderOtp } from "../lib/data";
+import { generateOtp, sendWhatsAppOtp } from "../lib/whatsapp";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -40,7 +42,18 @@ export function LoginPage() {
     try {
       setLoading(true);
       setError("");
-      await sendOtp(normalizedPhone);
+      const user = await findUserByPhone(normalizedPhone);
+
+      if (!user) {
+        setError("Yeh number registered nahi hai");
+        return;
+      }
+
+      const otpValue = generateOtp();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+      await storeRiderOtp(normalizedPhone, otpValue, expiresAt);
+      await sendWhatsAppOtp(normalizedPhone, otpValue);
       setStage("otp");
       setCooldown(30);
       pushToast("success", "OTP aapke WhatsApp par bheja gaya hai");
