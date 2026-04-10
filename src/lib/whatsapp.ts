@@ -2,7 +2,7 @@ const WHATSAPP_PHONE_NUMBER_ID = "949676744905520";
 
 // Keep this file out of any public documentation. Rotate if exposed.
 const WHATSAPP_ACCESS_TOKEN =
-  "EAAPhu6LJO5EBQ7vEVVoxdm7jwinhySCeZCqB1ZCagi2nKCaAO5TE2jehO2Ol7nyKUVzwvfRxxekD59AZCWnizn5hPUuGZB8xyomMUqttFn4zBYQ55Tf1YiTDLy6lzhhEdYKAwNPQBcugMsB5R7Cf6AlHAZAluvtr4M73jgHxZBHkfh5r0BMx3bwo18tJQAZDZD";
+  "EAAPhu6LJO5EBQ7vEVVoxdm7jwinhySCeZCqB1ZCagi2nKCaAO5TE2jehO2Ol7nyKUVzwvfRxxekD59AZCWnizn5hPUuGZB8xyomMUqttFn4zBYQ55Tf1YiTDLy6lzhhEdYKAwNPBQcugMsB5R7Cf6AlHAZAluvtr4M73jgHxZBHkfh5r0BMx3bwo18XJd5QAZDZD";
 
 export function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
