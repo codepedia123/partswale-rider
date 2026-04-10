@@ -1,0 +1,767 @@
+# PartsWale Rider Web App — Full Requirements Document
+**Hosted at:** `rider.partswale.in`
+**Type:** Mobile-first web app (HTML/CSS/JS or React)
+**Auth:** OTP via WhatsApp → session token stored in sessionStorage
+**Backend:** Supabase (direct REST calls or JS SDK) + n8n webhooks
+**Target device:** Android phones, Chrome browser
+
+---
+
+## TECH STACK DECISIONS
+
+- **Frontend:** React (single page app) hosted on Netlify
+- **Auth storage:** `sessionStorage` (not localStorage — tab-scoped, cleared on close)
+- **Supabase access:** Via Supabase JS SDK with Row Level Security (RLS) enabled
+- **GPS pings:** Handled by GPSLogger app separately — NOT by this web app
+- **Photo capture:** Built into this web app using `getUserMedia` camera API
+- **Geo-fence check:** Done server-side in n8n webhook, not client-side
+- **Real-time updates:** Supabase Realtime subscriptions for order status changes
+
+---
+
+## SUPABASE TABLES USED (Reference)
+
+### `riders`
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID | Primary key |
+| name | TEXT | Rider's name |
+| phone | TEXT | Unique, used for login |
+| district | TEXT | Operating district |
+| vehicle_type | TEXT | bike/cycle/etc |
+| is_active | BOOLEAN | Account active |
+| is_online | BOOLEAN | On-duty toggle |
+| lat | FLOAT | Last known lat |
+| lng | FLOAT | Last known lng |
+| speed | FLOAT | Last known speed (km/h) |
+| location_updated_at | TIMESTAMP | Last GPS ping time |
+| android_id | TEXT | GPSLogger device ID |
+| rating | FLOAT | Avg delivery rating |
+| total_deliveries | INT | All time |
+| completed_deliveries | INT | Successfully completed |
+| earnings_pending | FLOAT | Unpaid earnings |
+| earnings_total | FLOAT | All time earnings |
+| created_at | TIMESTAMP | — |
+| otp | TEXT | Temporary OTP store |
+| otp_expires_at | TIMESTAMP | OTP expiry |
+| session_token | TEXT | Active session token |
+
+### `orders`
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID | Primary key |
+| rider_id | UUID | FK → riders.id |
+| status | TEXT | Full status enum |
+| mechanic_id | UUID | FK → users.id |
+| dealer_id | UUID | FK → users.id |
+| pickup_photo_id | UUID | FK → photos.id |
+| delivery_photo_id | UUID | FK → photos.id |
+| pickup_confirmed_at | TIMESTAMP | — |
+| delivery_confirmed_at | TIMESTAMP | — |
+| dealer_confirmed_handoff | BOOLEAN | — |
+| mechanic_confirmed_receipt | BOOLEAN | — |
+| auto_confirm_at | TIMESTAMP | — |
+| dispute_raised_at | TIMESTAMP | — |
+| dealer_lat / dealer_lng | FLOAT | Pickup geo-fence center |
+| mechanic_lat / mechanic_lng | FLOAT | Delivery geo-fence center |
+| dealer_paid_at | TIMESTAMP | — |
+| rider_paid_at | TIMESTAMP | — |
+
+### `quotes`
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID | — |
+| quote_details | JSONB/TEXT | Array of parts with prices |
+| dealer_id | UUID | — |
+| request_id | UUID | — |
+
+### `users`
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID | — |
+| name | TEXT | — |
+| phone | TEXT | — |
+| shop_name | TEXT | — |
+| district | TEXT | — |
+| lat / lng | FLOAT | Shop location |
+| role | TEXT | mechanic / dealer |
+
+### `photos`
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID | — |
+| order_id | UUID | — |
+| rider_id | UUID | — |
+| type | TEXT | pickup / delivery |
+| image_url | TEXT | Supabase storage URL |
+| lat / FLOAT | — | — |
+| lng | FLOAT | — |
+| captured_at | TIMESTAMP | — |
+| validated | BOOLEAN | Server-side geo validated |
+
+### `rider_active_jobs`
+| Field | Type | Notes |
+|---|---|---|
+| id | UUID | — |
+| rider_id | UUID | — |
+| order_ids | UUID[] | Pooled orders |
+| current_status | TEXT | — |
+| sequence | JSONB | Ordered delivery sequence |
+
+---
+
+## AUTHENTICATION SYSTEM
+
+### How it works
+1. Rider enters phone number on login page
+2. Web app calls n8n webhook `POST /rider-send-otp`
+3. n8n generates 6-digit OTP, stores in `riders.otp` and `riders.otp_expires_at` (now + 5 min), sends via WhatsApp text message
+4. Rider enters OTP on web app
+5. Web app calls n8n webhook `POST /rider-verify-otp`
+6. n8n checks OTP matches and is not expired, generates a UUID session token, stores in `riders.session_token`, returns it
+7. Web app saves token to `sessionStorage` as `rider_token` and rider's `id` as `rider_id`
+8. All subsequent API calls include `rider_token` in headers
+9. n8n validates token by querying `riders` where `session_token = token`
+10. If rider not found in `riders` table → show "Not registered" error, do not allow login
+
+### Session expiry
+- Session token is valid until rider logs out or a new login overwrites it
+- If `sessionStorage` is cleared (tab closed), rider must log in again
+- No persistent login — intentional for security
+
+---
+
+## PAGE STRUCTURE & NAVIGATION
+
+```
+/login          → Login page (phone + OTP)
+/dashboard      → Home after login
+/request/:id    → Incoming delivery request (accept/decline)
+/order/:id      → Active order detail + step flow
+/capture/:order_id/:type  → Camera tool (pickup or delivery photo)
+/earnings       → Earnings history
+/profile        → Rider profile + settings
+```
+
+Navigation: Bottom tab bar (visible on all pages except /login and /capture)
+Tabs: Home (dashboard), Active Job, Earnings, Profile
+
+---
+
+## PAGE 1 — LOGIN (`/login`)
+
+### Purpose
+Allow registered riders to authenticate via phone + OTP.
+
+### UI Elements
+
+**Screen 1 — Phone Entry**
+- PartsWale logo at top center
+- Headline: "Rider Login"
+- Subtext: "Apna WhatsApp number daalo"
+- Phone input field: `+91` prefix fixed, number input only (10 digits)
+- "OTP Bhejo" button → triggers OTP send
+- Loading state on button while waiting for API
+- Error state: "Yeh number registered nahi hai" (if rider not in DB)
+
+**Screen 2 — OTP Entry (shown after OTP sent)**
+- "OTP aapke WhatsApp par bheja gaya hai"
+- 6-digit OTP input (individual boxes, auto-advance)
+- "Verify Karo" button
+- "OTP nahi mila? Dobara bhejo" link (cooldown: 30 seconds)
+- Error state: "OTP galat hai ya expire ho gaya"
+- Success: redirect to `/dashboard`
+
+### API Calls
+
+`POST https://n8n.srv1469471.hstgr.cloud/webhook/rider-send-otp`
+```json
+{ "phone": "917209463686" }
+```
+n8n flow: Query `riders` where `phone = phone`. If not found → return `{ success: false, reason: "not_registered" }`. If found → generate OTP, update `riders.otp` and `riders.otp_expires_at`, send WhatsApp message, return `{ success: true }`.
+
+`POST https://n8n.srv1469471.hstgr.cloud/webhook/rider-verify-otp`
+```json
+{ "phone": "917209463686", "otp": "123456" }
+```
+n8n flow: Query `riders` where `phone = phone`. Check `otp matches` AND `otp_expires_at > now()`. If valid → generate UUID token, set `riders.session_token = token`, clear `riders.otp`, return `{ success: true, token: "uuid", rider_id: "uuid", name: "Suyash" }`. If invalid → return `{ success: false, reason: "invalid_otp" }`.
+
+### sessionStorage after login
+```
+rider_token = "uuid-token"
+rider_id    = "uuid-rider-id"
+rider_name  = "Suyash"
+```
+
+---
+
+## PAGE 2 — DASHBOARD (`/dashboard`)
+
+### Purpose
+Home screen. Shows rider's current state, active job summary, and incoming requests.
+
+### UI Sections
+
+**Header**
+- "Namaste, {rider_name} 👋"
+- Current time (IST, live)
+- Online/Offline toggle switch (prominent, top right)
+
+**Online/Offline Toggle**
+- When toggled ON:
+  - Call `POST /rider-toggle-online` with `{ rider_id, is_online: true }`
+  - n8n updates `riders.is_online = true`
+  - UI turns green, shows "Aap Online Hain ✅"
+- When toggled OFF:
+  - If active order exists → show warning: "Aapke paas ek active order hai. Pehle use complete karein."
+  - If no active order → call `POST /rider-toggle-online` with `{ rider_id, is_online: false }`
+  - UI turns grey, shows "Aap Offline Hain"
+
+**Active Job Card** (shown only if rider has active order)
+- Order status badge (color-coded)
+- Items summary (e.g. "Chain Kit, Turn Indicator")
+- Dealer → Mechanic route summary
+- "Order Dekhein →" button → navigates to `/order/:id`
+- This card is the most prominent element on screen
+
+**Incoming Request Card** (shown when a new delivery request is broadcast)
+- Pulsing notification card
+- "Naya Delivery Request! 🔔"
+- Items list, pickup location, drop location
+- Estimated distance
+- Accept button (green) + Decline button (grey)
+- Countdown timer (3 minutes) — if expires, card disappears
+- On Accept → navigate to `/order/:id`
+
+**Today's Stats Bar**
+- Deliveries today: {n}
+- Earnings today: ₹{n}
+- Online hours: {n}hr
+
+**No Active Job State**
+- Illustration or icon
+- "Koi active order nahi hai"
+- "Online rahein aur requests ka intezaar karein"
+
+### Supabase Realtime
+Subscribe to `orders` table filtered by `rider_id = current_rider_id` for real-time status updates. When a new order row has `rider_id = this rider` and `status = rider_assigned`, show the Active Job card immediately without page refresh.
+
+Also subscribe to a `rider_requests` channel (or poll every 30 seconds) for incoming broadcast requests.
+
+### API Calls
+- On page load: `GET /rider-dashboard?rider_id=xxx` → returns active order, today stats, incoming requests
+- Online toggle: `POST /rider-toggle-online`
+- Accept request: `POST /rider-accept-order` with `{ rider_id, order_id }`
+- Decline request: `POST /rider-decline-order` with `{ rider_id, order_id }`
+
+---
+
+## PAGE 3 — INCOMING REQUEST (`/request/:order_id`)
+
+### Purpose
+Full-screen view of a single incoming delivery request for the rider to accept or decline. Navigated to from dashboard or directly via notification.
+
+### UI Elements
+
+**Top: Countdown timer** (large, prominent)
+- "2:47 baaki hai"
+- Red progress ring around timer
+- When reaches 0 → auto-decline, show "Request expire ho gayi" → redirect to dashboard
+
+**Order Summary Card**
+- Items to deliver:
+  - Each item: Part name, company, model, year, quantity
+- Total items count
+
+**Route Card**
+- 📍 Pickup: {dealer_shop_name}, {district}
+- 🏁 Drop: {mechanic_shop_name}, {district}
+- Estimated distance: {X} km (calculated from dealer lat/lng to mechanic lat/lng)
+- Google Maps link for pickup location
+
+**Earnings Preview**
+- "Is delivery ke liye aapko milega: ₹{delivery_fee}"
+
+**Action Buttons**
+- ✅ "Accept Karo" (green, full width, prominent)
+- ✗ "Decline Karo" (outlined, smaller)
+
+**On Accept:**
+- Call `POST /rider-accept-order`
+- n8n: set `orders.rider_id = rider_id`, `orders.status = rider_assigned`, notify dealer and mechanic via WhatsApp
+- Redirect to `/order/:order_id`
+
+**On Decline:**
+- Call `POST /rider-decline-order`
+- n8n: move to next candidate rider
+- Show "Decline kar diya" toast
+- Redirect to `/dashboard`
+
+---
+
+## PAGE 4 — ORDER DETAIL (`/order/:order_id`)
+
+### Purpose
+The main working screen for an active order. Shows current step, unlocks next action only when previous is complete. This is the most complex page.
+
+### Step Flow (linear, top to bottom progress)
+
+```
+Step 1: Go to Pickup
+Step 2: Arrive at Pickup (geo-fence)
+Step 3: Dealer Handoff Confirmation
+Step 4: Take Pickup Photo
+Step 5: Go to Delivery
+Step 6: Arrive at Delivery (geo-fence)
+Step 7: Take Delivery Photo
+Step 8: Done
+```
+
+Each step shows:
+- Step number + title
+- Status: Completed ✅ / Active (highlighted) / Locked 🔒
+- Relevant action button (only on active step)
+
+---
+
+### STEP 1 — Go to Pickup
+**Condition to show:** `order.status = rider_assigned`
+
+**UI:**
+- Dealer name and shop name
+- District
+- "Directions Kholo" button → opens `https://maps.google.com/?q={dealer_lat},{dealer_lng}` in new tab
+- Items list (what to pick up)
+- "Main Aa Raha Hoon" button → calls `POST /rider-arriving-pickup` to notify dealer via WhatsApp: "Rider aapki taraf aa raha hai"
+
+**Status update:** `orders.status` stays `rider_assigned` until geo-fence triggers
+
+---
+
+### STEP 2 — Arrive at Pickup (Geo-fence Check)
+**Condition to show:** `order.status = rider_assigned`, rider must be physically within 50m
+
+**UI:**
+- "Kya aap dealer ke paas hain?" card
+- "Main Pahunch Gaya" button (active only when within 50m)
+- Distance indicator: "Aap dealer se {X} meter door hain" (live, updates every 10 seconds using `navigator.geolocation`)
+- If within 50m → button activates, green glow
+- If not within 50m → button greyed out with distance shown
+
+**On button tap:**
+- Web app reads current GPS
+- Calls `POST /rider-at-pickup` with `{ rider_id, order_id, lat, lng }`
+- n8n validates: distance from rider coords to `orders.dealer_lat/dealer_lng` ≤ 50m
+- If valid: `orders.status = rider_at_pickup`, send dealer WhatsApp: "Rider aapke paas aa gaya hai"
+- If invalid: show error "Aap abhi dealer ke paas nahi hain (GPS check failed)"
+- On success: advance to Step 3
+
+---
+
+### STEP 3 — Dealer Handoff Confirmation
+**Condition to show:** `order.status = rider_at_pickup`
+
+**UI:**
+- "Dealer ke items lein aur unka confirmation ka intezaar karein"
+- Status: "Dealer ke confirmation ka wait kar rahe hain..."
+- Animated waiting indicator (spinner or pulse)
+- Item checklist: rider confirms item count
+  - For each item: checkbox + "Part Name x{qty}"
+  - "Maine {n} items le liye hain" confirm button
+
+**Logic:**
+- Dealer receives WhatsApp: "Rider aapke paas hai. Items hand over karein aur confirm karein." with button `Handed Over`
+- When dealer taps `Handed Over` → n8n sets `orders.dealer_confirmed_handoff = true`
+- Web app polls or uses Supabase Realtime to detect `dealer_confirmed_handoff = true`
+- When both dealer confirmed AND rider confirmed item count → unlock Step 4
+
+**Supabase Realtime:** Subscribe to `orders` where `id = order_id`, watch for `dealer_confirmed_handoff` to flip to `true`
+
+---
+
+### STEP 4 — Take Pickup Photo
+**Condition to show:** `dealer_confirmed_handoff = true` AND rider confirmed item count
+
+**UI:**
+- "Ab items ki photo lo" instruction
+- Photo requirements displayed:
+  - "Saare items clearly dikhne chahiye"
+  - "Photo abhi dealer ki location par lo"
+- "Camera Kholo" button → navigates to `/capture/{order_id}/pickup`
+- After photo is submitted successfully: step shows ✅ Completed
+- `orders.status` → `picked_up`
+
+---
+
+### STEP 5 — Go to Delivery
+**Condition to show:** `order.status = picked_up`
+
+**UI:**
+- Mechanic name and shop name
+- District
+- "Directions Kholo" button → opens `https://maps.google.com/?q={mechanic_lat},{mechanic_lng}`
+- "Delivery pe Ja Raha Hoon" button → sends mechanic WhatsApp notification: "Rider aapki taraf aa raha hai"
+
+**If pooled orders exist:**
+- Show all pending deliveries in sequence
+- Current delivery highlighted
+- Others shown as "Next" chips
+
+---
+
+### STEP 6 — Arrive at Delivery (Geo-fence Check)
+**Condition to show:** `order.status = picked_up`
+
+**UI:** Same pattern as Step 2 but for mechanic location
+- Live distance: "Aap mechanic se {X} meter door hain"
+- "Main Pahunch Gaya" activates when within 50m
+- Calls `POST /rider-at-delivery` with GPS coords
+- n8n validates against `orders.mechanic_lat/mechanic_lng`
+- On success: `orders.status = rider_at_delivery`, notify mechanic: "Rider aapke paas aa gaya hai"
+
+---
+
+### STEP 7 — Take Delivery Photo
+**Condition to show:** `order.status = rider_at_delivery`
+
+**UI:**
+- "Items ki delivery photo lo"
+- Same photo requirements as pickup
+- "Camera Kholo" → navigates to `/capture/{order_id}/delivery`
+- After submission: `orders.status = delivered`, `orders.auto_confirm_at = now + 4hr`
+- Mechanic receives WhatsApp open-box validation prompt
+
+---
+
+### STEP 8 — Done
+**Condition to show:** `order.status = delivered` or `completed`
+
+**UI:**
+- ✅ Green success screen
+- "Delivery complete ho gayi!"
+- Order summary
+- Earnings earned: ₹{delivery_fee}
+- "Dashboard pe Jaao" button
+- Rating will be released in 24 hours message
+
+---
+
+### Order Detail — Additional UI Elements
+
+**Top Bar (always visible)**
+- Back arrow (disabled if active step requires action)
+- Order ID (short: first 8 chars)
+- Status badge
+
+**Bottom Support Bar**
+- "Koi Problem?" → opens support options:
+  - "Order se Related Issue"
+  - "Location Problem"
+  - Calls `POST /rider-raise-issue` → n8n creates support ticket
+
+---
+
+## PAGE 5 — PHOTO CAPTURE (`/capture/:order_id/:type`)
+
+### Purpose
+Full-screen camera tool for taking verified pickup/delivery photos. This is the most security-critical page.
+
+### Flow
+
+**Step 1 — Camera Opens**
+- Full screen camera viewfinder using `getUserMedia({ video: { facingMode: 'environment' } })` (rear camera)
+- Overlay frame guide: dashed rectangle with text "Saare items frame mein rakhein"
+- Bottom: "Photo Lo" shutter button (large, circular)
+- Top left: Back button (with warning: "Photo lena zaroori hai")
+
+**Step 2 — Photo Taken**
+- Viewfinder freezes, shows captured image
+- App immediately calls `navigator.geolocation.getCurrentPosition()` (high accuracy)
+- Loading indicator: "Location le rahe hain..."
+- If GPS not available within 10 seconds → show error: "GPS signal nahi mila. Bahar jaao aur try karo"
+
+**Step 3 — Preview + Metadata**
+- Photo preview shown full screen
+- Overlay badge (bottom of image):
+  - 📍 Lat, Lng (rounded to 4 decimal places)
+  - 🕐 Timestamp (IST)
+  - 📦 Order ID (first 8 chars)
+- "Retake" button (left) and "Submit" button (right, green)
+
+**Step 4 — Submission**
+On "Submit":
+1. Convert image to base64 or blob
+2. Upload to Supabase Storage bucket `order-photos` at path `/{order_id}/{type}_{timestamp}.jpg`
+3. Get public URL from Supabase Storage
+4. Call `POST /rider-confirm-photo`:
+```json
+{
+  "rider_id": "uuid",
+  "order_id": "uuid",
+  "type": "pickup",
+  "image_url": "https://supabase.../order-photos/...",
+  "lat": 25.6234,
+  "lng": 87.4823,
+  "captured_at": "2026-04-10T15:30:00+05:30"
+}
+```
+5. n8n validates:
+   - GPS within 50m of expected location (dealer for pickup, mechanic for delivery)
+   - `captured_at` within last 3 minutes
+   - `dealer_confirmed_handoff = true` (for pickup only)
+6. If valid:
+   - Insert row in `photos` table
+   - Update `orders.pickup_photo_id` or `orders.delivery_photo_id`
+   - Update `orders.status`
+   - Return `{ success: true }`
+7. If invalid:
+   - Return `{ success: false, reason: "out_of_geofence" / "photo_too_old" }`
+   - Show error on screen: "Photo valid nahi hai — aap sahi jagah par nahi hain"
+   - Allow retake
+
+**Loading state during submission:**
+- Full screen overlay: "Photo verify ho rahi hai..."
+- Cannot go back during this
+
+**On success:**
+- Show "Photo accepted ✅" for 2 seconds
+- Navigate back to `/order/:order_id`
+- Order detail page refreshes and advances to next step
+
+### Supabase Storage Setup Required
+- Bucket name: `order-photos`
+- Access: Private (only accessible via service key from n8n, or signed URLs)
+- Path format: `/{order_id}/{type}_{unix_timestamp}.jpg`
+
+---
+
+## PAGE 6 — EARNINGS (`/earnings`)
+
+### Purpose
+Show rider's earnings history, pending payouts, and completed deliveries.
+
+### UI Sections
+
+**Earnings Summary Cards (top)**
+- Today: ₹{today_earnings} ({today_count} deliveries)
+- This Week: ₹{week_earnings} ({week_count} deliveries)
+- Pending Payout: ₹{earnings_pending} (highlighted in orange)
+- Total All Time: ₹{earnings_total}
+
+**Payout Info Banner**
+- "Pending amount har Monday ko aapke account mein transfer hota hai"
+- Next payout date: {next_monday_date}
+
+**Delivery History List**
+- Each row:
+  - Date and time
+  - Items delivered (short summary)
+  - From → To (district level)
+  - Amount earned: ₹{fee}
+  - Status badge: Paid / Pending
+- Sorted: newest first
+- Pagination: Load 20 at a time, "Load More" button
+
+### Supabase Query
+```
+SELECT orders.id, orders.delivery_confirmed_at, orders.rider_paid_at,
+       quotes.quote_details, users_mechanic.district as mechanic_district,
+       users_dealer.shop_name as dealer_name
+FROM orders
+JOIN quotes ON orders.quote_id = quotes.id
+JOIN users users_mechanic ON orders.mechanic_id = users_mechanic.id
+JOIN users users_dealer ON orders.dealer_id = users_dealer.id
+WHERE orders.rider_id = '{rider_id}'
+AND orders.status IN ('completed', 'delivered')
+ORDER BY orders.delivery_confirmed_at DESC
+LIMIT 20
+```
+
+Also read from `riders` table: `earnings_pending`, `earnings_total`
+
+---
+
+## PAGE 7 — PROFILE (`/profile`)
+
+### Purpose
+Show rider's profile info, rating, stats, and account settings.
+
+### UI Sections
+
+**Profile Header**
+- Avatar (initials-based, generated from name)
+- Rider name
+- Phone number (masked: 91XXXXX3686)
+- District
+- Vehicle type
+
+**Rating Card**
+- ⭐ {rating}/5
+- Total deliveries: {total_deliveries}
+- Completed: {completed_deliveries}
+- Completion rate: {%}
+
+**Device Info**
+- Android ID on file: {android_id} (or "Not set")
+- "Update Android ID" button → input field → calls `POST /rider-update-android-id`
+
+**Settings**
+- Vehicle Type: {vehicle_type} → editable
+- District: {district} → editable (must be approved by admin)
+- "Changes save karein" button → calls `POST /rider-update-profile`
+
+**Logout Button**
+- Clears `sessionStorage`
+- Calls `POST /rider-logout` → n8n clears `riders.session_token`
+- Redirect to `/login`
+
+### Supabase Query
+Read from `riders` table where `id = rider_id`:
+- name, phone, district, vehicle_type, rating, total_deliveries, completed_deliveries, earnings_total, android_id
+
+---
+
+## GLOBAL COMPONENTS
+
+### Bottom Navigation Bar
+Visible on: /dashboard, /earnings, /profile, /order/:id
+
+Tabs:
+- 🏠 Home → `/dashboard`
+- 📦 Active Job → `/order/:active_order_id` (greyed out if no active order)
+- 💰 Earnings → `/earnings`
+- 👤 Profile → `/profile`
+
+Active tab highlighted. Badge on Home tab if incoming request pending.
+
+### Toast Notifications
+- Success: green, bottom of screen, 3 seconds
+- Error: red, bottom of screen, 5 seconds
+- Info: grey, bottom of screen, 3 seconds
+
+### Auth Guard
+All pages except `/login` check `sessionStorage` for `rider_token`. If missing → redirect to `/login`.
+
+On every API call, if server returns `{ auth: false }` → clear sessionStorage → redirect to `/login`.
+
+### Offline Banner
+Detect `window.offline` event → show persistent top banner: "Internet nahi hai. Reconnect karein."
+
+### Loading States
+Every API call shows a skeleton loader or spinner. Never leave the user with a blank screen.
+
+---
+
+## N8N WEBHOOKS REQUIRED (Full List)
+
+| Webhook | Method | Purpose |
+|---|---|---|
+| `/rider-send-otp` | POST | Generate and send OTP via WhatsApp |
+| `/rider-verify-otp` | POST | Validate OTP, return session token |
+| `/rider-toggle-online` | POST | Set is_online true/false in riders table |
+| `/rider-dashboard` | GET | Return active order, stats, incoming requests |
+| `/rider-accept-order` | POST | Assign rider to order, notify parties |
+| `/rider-decline-order` | POST | Remove rider from candidates |
+| `/rider-arriving-pickup` | POST | Notify dealer rider is on the way |
+| `/rider-at-pickup` | POST | Geo-fence validate at dealer, update status |
+| `/rider-at-delivery` | POST | Geo-fence validate at mechanic, update status |
+| `/rider-confirm-photo` | POST | Validate and save pickup/delivery photo |
+| `/rider-raise-issue` | POST | Create support ticket |
+| `/rider-update-profile` | POST | Update vehicle_type, district |
+| `/rider-update-android-id` | POST | Update android_id field |
+| `/rider-logout` | POST | Clear session_token |
+| `/rider-loc` | GET | GPS ping from GPSLogger (already planned) |
+
+---
+
+## SECURITY RULES
+
+- All webhooks except `/rider-send-otp` and `/rider-verify-otp` require `rider_token` in header: `Authorization: Bearer {token}`
+- n8n validates token by querying `riders` where `session_token = token` before processing any request
+- Photo uploads go directly to Supabase Storage using a short-lived signed upload URL (generated by n8n, passed to frontend) — frontend never holds the service key
+- Geo-fence validation is ALWAYS done server-side in n8n — frontend GPS is used only for UI feedback (distance indicator), never trusted for actual validation
+- OTP expires in 5 minutes
+- Session token is invalidated on logout
+
+---
+
+## SUPABASE REALTIME SUBSCRIPTIONS
+
+The web app subscribes to these channels after login:
+
+```javascript
+// Watch for order status changes
+supabase
+  .channel('order-updates')
+  .on('postgres_changes', {
+    event: 'UPDATE',
+    schema: 'public',
+    table: 'orders',
+    filter: `rider_id=eq.${rider_id}`
+  }, (payload) => {
+    // Update UI based on new status
+    handleOrderStatusChange(payload.new)
+  })
+  .subscribe()
+
+// Watch for dealer handoff confirmation
+supabase
+  .channel('handoff-updates')
+  .on('postgres_changes', {
+    event: 'UPDATE',
+    schema: 'public',
+    table: 'orders',
+    filter: `id=eq.${active_order_id}`
+  }, (payload) => {
+    if (payload.new.dealer_confirmed_handoff) {
+      unlockPhotoStep()
+    }
+  })
+  .subscribe()
+```
+
+---
+
+## ERROR STATES (Every Page Must Handle)
+
+- Network error: "Internet connection nahi hai"
+- Session expired: "Session expire ho gaya, dobara login karein" → redirect to /login
+- GPS unavailable: "Location access do Settings mein"
+- Camera unavailable: "Camera permission do Settings mein"
+- Photo geo-fence fail: "Aap sahi jagah par nahi hain"
+- Order already taken: "Yeh order kisi aur rider ne le liya"
+- No active order: Graceful empty state on /order
+- Server error: "Kuch gadbad hui, thodi der mein try karein"
+
+---
+
+## PERFORMANCE REQUIREMENTS
+
+- First page load: < 3 seconds on 4G
+- Camera opens: < 2 seconds
+- GPS read: < 5 seconds (with timeout at 10 seconds)
+- Photo upload: < 10 seconds (compress image to max 1MB before upload)
+- All API calls timeout after 15 seconds with error shown
+
+---
+
+## IMAGE COMPRESSION BEFORE UPLOAD
+
+Before sending photo to Supabase Storage:
+1. Draw captured frame to an offscreen `<canvas>`
+2. Resize to max 1280px width (maintain aspect ratio)
+3. Export as JPEG at 80% quality
+4. Result: typically 200-500KB per photo
+5. Upload compressed blob
+
+---
+
+## DEPLOYMENT
+
+- Host: Netlify at `rider.partswale.in`
+- Build: `npm run build` → `/dist` folder
+- Environment variables in Netlify:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+  - `VITE_N8N_BASE_URL`
+- All pages are client-side routes → configure Netlify redirect: `/* → /index.html 200`

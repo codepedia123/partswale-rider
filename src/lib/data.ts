@@ -1,0 +1,200 @@
+import type {
+  DeliveryHistoryItem,
+  EarningsData,
+  OrderBundle,
+  OrderRecord,
+  QuoteItem,
+  RiderProfile,
+  UserShop,
+} from "../types/domain";
+import { formatISTDate } from "./format";
+import { parseQuoteItems } from "./format";
+import { supabase } from "./supabase";
+
+function ensureSupabase() {
+  if (!supabase) {
+    throw new Error("Supabase is not configured");
+  }
+
+  return supabase;
+}
+
+async function fetchSingleUser(id?: string | null) {
+  if (!id) {
+    return null;
+  }
+
+  const client = ensureSupabase();
+  const { data, error } = await client.from("users").select("*").eq("id", id).maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+async function fetchQuoteDetails(quoteId?: string | null) {
+  if (!quoteId) {
+    return [];
+  }
+
+  const client = ensureSupabase();
+  const { data, error } = await client
+    .from("quotes")
+    .select("quote_details")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return parseQuoteItems(data?.quote_details);
+}
+
+async function fetchPooledSequence(riderId?: string | null) {
+  if (!riderId) {
+    return [];
+  }
+
+  const client = ensureSupabase();
+  const { data, error } = await client
+    .from("rider_active_jobs")
+    .select("sequence")
+    .eq("rider_id", riderId)
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    return [];
+  }
+
+  if (Array.isArray(data?.sequence)) {
+    return data.sequence;
+  }
+
+  return parseQuoteItems(data?.sequence).map((item) => item.id ?? "");
+}
+
+export async function fetchOrderBundle(orderId: string): Promise<OrderBundle> {
+  const client = ensureSupabase();
+  const { data: order, error } = await client.from("orders").select("*").eq("id", orderId).maybeSingle();
+
+  if (error || !order) {
+    throw error ?? new Error("Order not found");
+  }
+
+  const [dealer, mechanic, quoteItems, pooledSequence] = await Promise.all([
+    fetchSingleUser(order.dealer_id),
+    fetchSingleUser(order.mechanic_id),
+    fetchQuoteDetails(order.quote_id),
+    fetchPooledSequence(order.rider_id),
+  ]);
+
+  return {
+    order,
+    dealer,
+    mechanic,
+    quoteItems,
+    pooledSequence,
+  };
+}
+
+export async function fetchRiderProfile(riderId: string): Promise<RiderProfile> {
+  const client = ensureSupabase();
+  const { data, error } = await client
+    .from("riders")
+    .select(
+      "id, name, phone, district, vehicle_type, rating, total_deliveries, completed_deliveries, earnings_total, earnings_pending, android_id, is_online",
+    )
+    .eq("id", riderId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw error ?? new Error("Profile not found");
+  }
+
+  return data;
+}
+
+export async function fetchEarnings(riderId: string, offset = 0, limit = 20): Promise<EarningsData> {
+  const client = ensureSupabase();
+  const [riderResult, ordersResult] = await Promise.all([
+    client
+      .from("riders")
+      .select("earnings_pending, earnings_total")
+      .eq("id", riderId)
+      .maybeSingle(),
+    client
+      .from("orders")
+      .select("*")
+      .eq("rider_id", riderId)
+      .in("status", ["completed", "delivered"])
+      .order("delivery_confirmed_at", { ascending: false })
+      .range(offset, offset + limit - 1),
+  ]);
+
+  if (riderResult.error) {
+    throw riderResult.error;
+  }
+
+  if (ordersResult.error) {
+    throw ordersResult.error;
+  }
+
+  const history = await Promise.all(
+    ((ordersResult.data ?? []) as OrderRecord[]).map(async (order) => {
+      const [dealer, mechanic, quoteDetails] = await Promise.all([
+        fetchSingleUser(order.dealer_id),
+        fetchSingleUser(order.mechanic_id),
+        fetchQuoteDetails(order.quote_id),
+      ]);
+
+      return {
+        id: order.id,
+        deliveryConfirmedAt: order.delivery_confirmed_at,
+        riderPaidAt: order.rider_paid_at,
+        quoteDetails,
+        mechanicDistrict: mechanic?.district ?? null,
+        dealerName: dealer?.shop_name ?? dealer?.name ?? null,
+        deliveryFee: order.delivery_fee ?? null,
+        status: order.rider_paid_at ? "Paid" : "Pending",
+      } satisfies DeliveryHistoryItem;
+    }),
+  );
+
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - ((now.getDay() + 6) % 7));
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const todayOrders = history.filter((item) => {
+    const date = item.deliveryConfirmedAt ? new Date(item.deliveryConfirmedAt) : null;
+    return date ? date >= startOfToday : false;
+  });
+
+  const weekOrders = history.filter((item) => {
+    const date = item.deliveryConfirmedAt ? new Date(item.deliveryConfirmedAt) : null;
+    return date ? date >= startOfWeek : false;
+  });
+
+  const nextMonday = new Date(now);
+  const daysUntilMonday = (8 - now.getDay()) % 7 || 7;
+  nextMonday.setDate(now.getDate() + daysUntilMonday);
+
+  return {
+    todayEarnings: todayOrders.reduce((sum, item) => sum + (item.deliveryFee ?? 0), 0),
+    todayCount: todayOrders.length,
+    weekEarnings: weekOrders.reduce((sum, item) => sum + (item.deliveryFee ?? 0), 0),
+    weekCount: weekOrders.length,
+    pendingPayout: riderResult.data?.earnings_pending ?? 0,
+    totalAllTime: riderResult.data?.earnings_total ?? 0,
+    nextMondayDate: formatISTDate(nextMonday),
+    history,
+  };
+}
