@@ -98,7 +98,8 @@ async function edgeRequest<T>(
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), 15000);
-  const url = new URL(`${edgeFunctionBase}/${name}`);
+  const functionName = name.replace(/^\/+/, "");
+  const url = new URL(`${edgeFunctionBase}/${functionName}`);
 
   Object.entries(options?.query ?? {}).forEach(([key, value]) => {
     if (value !== undefined && value !== null) {
@@ -183,14 +184,14 @@ function normalizeActiveOrder(raw: unknown): DashboardData["activeOrder"] {
 }
 
 export function sendOtp(phone: string) {
-  return edgeRequest("/rider-send-otp", {
+  return edgeRequest("rider-send-otp", {
     method: "POST",
     body: JSON.stringify({ phone }),
   });
 }
 
 export function verifyOtp(phone: string, otp: string) {
-  return edgeRequest<{ token: string; rider_id: string; name: string }>("/rider-verify-otp", {
+  return edgeRequest<{ token: string; rider_id: string; name: string }>("rider-verify-otp", {
     method: "POST",
     body: JSON.stringify({ phone, otp }),
   });
@@ -213,7 +214,7 @@ export async function getDashboard(session: RiderSession) {
     };
     incoming_requests?: IncomingRequest[];
     is_online?: boolean;
-  }>("/rider-dashboard", { method: "GET" }, {
+  }>("rider-dashboard", { method: "GET" }, {
     token: session.token,
     query: { rider_id: session.riderId },
   });
