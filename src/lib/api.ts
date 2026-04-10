@@ -1,10 +1,12 @@
-import { env } from "./env";
+import { edgeFunctionBase, env, isSupabaseConfigured } from "./env";
 import type {
   ApiEnvelope,
   DashboardData,
   IncomingRequest,
+  OrderBundle,
   RiderSession,
 } from "../types/domain";
+import { parseQuoteItems } from "./format";
 
 export class ApiError extends Error {
   status?: number;
@@ -85,15 +87,110 @@ async function request<T>(
   }
 }
 
+async function edgeRequest<T>(
+  name: string,
+  init: RequestInit = {},
+  options?: { token?: string | null; query?: Record<string, string | number | undefined> },
+) {
+  if (!isSupabaseConfigured || !edgeFunctionBase) {
+    throw new ApiError("Supabase edge functions are not configured");
+  }
+
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+  const url = new URL(`${edgeFunctionBase}/${name}`);
+
+  Object.entries(options?.query ?? {}).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  });
+
+  try {
+    const response = await fetch(url.toString(), {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        apikey: env.supabaseAnonKey,
+        ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+    const payload = text ? (JSON.parse(text) as ApiEnvelope<T>) : ({} as ApiEnvelope<T>);
+
+    if (payload.auth === false || response.status === 401) {
+      throw new ApiError("Session expired", {
+        status: response.status,
+        auth: true,
+        reason: payload.reason,
+      });
+    }
+
+    if (!response.ok || payload.success === false) {
+      throw new ApiError(payload.message ?? "Request failed", {
+        status: response.status,
+        reason: payload.reason,
+      });
+    }
+
+    return payload;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new ApiError("Request timed out");
+    }
+
+    throw new ApiError(error instanceof Error ? error.message : "Network error");
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function normalizeActiveOrder(raw: unknown): DashboardData["activeOrder"] {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const dealer = (record.dealer as OrderBundle["dealer"]) ?? null;
+  const mechanic = (record.mechanic as OrderBundle["mechanic"]) ?? null;
+  const quoteItems = parseQuoteItems(record.quoteItems);
+  const pooledSequence = Array.isArray(record.pooledSequence)
+    ? (record.pooledSequence as string[])
+    : [];
+
+  const {
+    dealer: _dealer,
+    mechanic: _mechanic,
+    quoteItems: _quoteItems,
+    pooledSequence: _pooledSequence,
+    ...order
+  } = record;
+
+  return {
+    order: order as unknown as OrderBundle["order"],
+    dealer,
+    mechanic,
+    quoteItems,
+    pooledSequence,
+  };
+}
+
 export function sendOtp(phone: string) {
-  return request("/rider-send-otp", {
+  return edgeRequest("/rider-send-otp", {
     method: "POST",
     body: JSON.stringify({ phone }),
   });
 }
 
 export function verifyOtp(phone: string, otp: string) {
-  return request<{ token: string; rider_id: string; name: string }>("/rider-verify-otp", {
+  return edgeRequest<{ token: string; rider_id: string; name: string }>("/rider-verify-otp", {
     method: "POST",
     body: JSON.stringify({ phone, otp }),
   });
@@ -107,8 +204,8 @@ export function toggleOnline(session: RiderSession, isOnline: boolean) {
 }
 
 export async function getDashboard(session: RiderSession) {
-  const payload = await request<{
-    active_order?: DashboardData["activeOrder"];
+  const payload = await edgeRequest<{
+    active_order?: unknown;
     today_stats?: {
       deliveries_today?: number;
       earnings_today?: number;
@@ -121,7 +218,7 @@ export async function getDashboard(session: RiderSession) {
     query: { rider_id: session.riderId },
   });
   const data = (payload.data ?? {}) as {
-    active_order?: DashboardData["activeOrder"];
+    active_order?: unknown;
     today_stats?: {
       deliveries_today?: number;
       earnings_today?: number;
@@ -131,7 +228,7 @@ export async function getDashboard(session: RiderSession) {
     is_online?: boolean;
   };
   const topLevel = payload as {
-    active_order?: DashboardData["activeOrder"];
+    active_order?: unknown;
     today_stats?: {
       deliveries_today?: number;
       earnings_today?: number;
@@ -142,7 +239,7 @@ export async function getDashboard(session: RiderSession) {
   };
 
   return {
-    activeOrder: (topLevel.active_order ?? data.active_order ?? null) as DashboardData["activeOrder"],
+    activeOrder: normalizeActiveOrder(topLevel.active_order ?? data.active_order ?? null),
     incomingRequests: (topLevel.incoming_requests ?? data.incoming_requests ?? []) as IncomingRequest[],
     stats: {
       deliveriesToday: (topLevel.today_stats?.deliveries_today ?? data.today_stats?.deliveries_today ?? 0) as number,

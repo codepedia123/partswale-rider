@@ -6,5 +6,9 @@ export const env = {
   n8nBaseUrl: envValue(import.meta.env.VITE_N8N_BASE_URL),
 };
 
+export const edgeFunctionBase = env.supabaseUrl
+  ? `${env.supabaseUrl.replace(/\/$/, "")}/functions/v1`
+  : "";
+
 export const isSupabaseConfigured =
   env.supabaseUrl.length > 0 && env.supabaseAnonKey.length > 0;
