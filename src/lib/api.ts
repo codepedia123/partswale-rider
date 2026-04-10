@@ -28,7 +28,7 @@ async function request<T>(
   options?: { token?: string | null; query?: Record<string, string | number | undefined> },
 ) {
   if (!env.n8nBaseUrl) {
-    throw new ApiError("VITE_N8N_BASE_URL is not configured");
+    throw new ApiError("VITE_N8N_BASE_URL is not configure");
   }
 
   const controller = new AbortController();
