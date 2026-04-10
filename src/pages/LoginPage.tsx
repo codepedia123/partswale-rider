@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
-import { verifyOtp } from "../lib/api";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { OtpInput } from "../components/shared/OtpInput";
 import { getErrorMessage } from "../lib/errorHandling";
-import { findUserByPhone, storeRiderOtp } from "../lib/data";
+import { findUserByPhone } from "../lib/data";
 import { generateOtp, sendWhatsAppOtp } from "../lib/whatsapp";
+import { sessionStorageApi } from "../lib/storage";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -52,7 +52,13 @@ export function LoginPage() {
       const otpValue = generateOtp();
       const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-      await storeRiderOtp(normalizedPhone, otpValue, expiresAt);
+      sessionStorageApi.writeOtpChallenge({
+        phone: normalizedPhone,
+        otp: otpValue,
+        riderId: user.id,
+        riderName: user.name,
+        expiresAt,
+      });
       await sendWhatsAppOtp(normalizedPhone, otpValue);
       setStage("otp");
       setCooldown(30);
@@ -68,20 +74,29 @@ export function LoginPage() {
     try {
       setLoading(true);
       setError("");
-      const response = await verifyOtp(normalizedPhone, otp);
-      const token = (response.token ?? response.data?.token) as string | undefined;
-      const riderId = (response.rider_id ?? response.data?.rider_id) as string | undefined;
-      const name = (response.name ?? response.data?.name) as string | undefined;
+      const challenge = sessionStorageApi.readOtpChallenge();
 
-      if (!token || !riderId || !name) {
-        throw new Error("Login response incomplete hai");
+      if (!challenge || challenge.phone !== normalizedPhone) {
+        throw new Error("OTP session nahi mila");
       }
 
+      if (new Date(challenge.expiresAt).getTime() <= Date.now()) {
+        sessionStorageApi.clearOtpChallenge();
+        throw new Error("OTP galat hai ya expire ho gaya");
+      }
+
+      if (challenge.otp !== otp) {
+        throw new Error("OTP galat hai ya expire ho gaya");
+      }
+
+      const token = crypto.randomUUID();
       setSession({
         token,
-        riderId,
-        riderName: name,
+        riderId: challenge.riderId,
+        riderName: challenge.riderName,
       });
+
+      sessionStorageApi.clearOtpChallenge();
 
       navigate(location.state?.from ?? "/dashboard", { replace: true });
     } catch (requestError) {

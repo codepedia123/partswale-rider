@@ -5,6 +5,7 @@ const SESSION_KEYS = {
   riderId: "rider_id",
   riderName: "rider_name",
   activeOrderId: "active_order_id",
+  otpChallenge: "rider_otp_challenge",
 };
 
 export const sessionStorageApi = {
@@ -31,6 +32,7 @@ export const sessionStorageApi = {
     sessionStorage.removeItem(SESSION_KEYS.riderId);
     sessionStorage.removeItem(SESSION_KEYS.riderName);
     sessionStorage.removeItem(SESSION_KEYS.activeOrderId);
+    sessionStorage.removeItem(SESSION_KEYS.otpChallenge);
   },
 
   writeActiveOrderId(orderId: string | null) {
@@ -44,5 +46,39 @@ export const sessionStorageApi = {
 
   readActiveOrderId() {
     return sessionStorage.getItem(SESSION_KEYS.activeOrderId);
+  },
+
+  writeOtpChallenge(challenge: {
+    phone: string;
+    otp: string;
+    riderId: string;
+    riderName: string;
+    expiresAt: string;
+  }) {
+    sessionStorage.setItem(SESSION_KEYS.otpChallenge, JSON.stringify(challenge));
+  },
+
+  readOtpChallenge() {
+    const raw = sessionStorage.getItem(SESSION_KEYS.otpChallenge);
+
+    if (!raw) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(raw) as {
+        phone: string;
+        otp: string;
+        riderId: string;
+        riderName: string;
+        expiresAt: string;
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  clearOtpChallenge() {
+    sessionStorage.removeItem(SESSION_KEYS.otpChallenge);
   },
 };
