@@ -198,7 +198,7 @@ export function verifyOtp(phone: string, otp: string) {
 }
 
 export function toggleOnline(session: RiderSession, isOnline: boolean) {
-  return request("/rider-toggle-online", {
+  return edgeRequest("rider-toggle-online", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, is_online: isOnline }),
   }, { token: session.token });
