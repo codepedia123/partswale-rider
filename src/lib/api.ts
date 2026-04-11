@@ -115,7 +115,8 @@ async function edgeRequest<T>(
       headers: {
         "Content-Type": "application/json",
         apikey: supabasePublishableKey,
-        Authorization: `Bearer ${options?.token ?? supabasePublishableKey}`,
+        Authorization: `Bearer ${supabasePublishableKey}`,
+        ...(options?.token ? { "x-rider-token": options.token } : {}),
         ...(init.headers ?? {}),
       },
       signal: controller.signal,
