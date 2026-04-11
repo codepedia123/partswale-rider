@@ -151,6 +151,16 @@ export async function storeRiderOtp(phone: string, otp: string, expiresAt: strin
   }
 }
 
+function normalizeDistrict(value?: string | null) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  const districtAliases: Record<string, string> = {
+    purnea: "purnia",
+    purnia: "purnia",
+  };
+
+  return districtAliases[normalized] ?? normalized;
+}
+
 function normalizeText(value?: string | null) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -172,7 +182,7 @@ export async function fetchPendingRiderJobs(
 
   const riderLat = riderLocation?.lat ?? (rider?.lat == null ? null : Number(rider.lat));
   const riderLng = riderLocation?.lng ?? (rider?.lng == null ? null : Number(rider.lng));
-  const riderDistrict = normalizeText(rider?.district);
+  const riderDistrict = normalizeDistrict(rider?.district);
 
   if (!riderDistrict || riderLat == null || riderLng == null || Number.isNaN(riderLat) || Number.isNaN(riderLng)) {
     throw new Error("Rider district or current location missing");
@@ -192,7 +202,7 @@ export async function fetchPendingRiderJobs(
   }
 
   return ((orders ?? []) as OrderRecord[])
-    .filter((order) => normalizeText(order.district) === riderDistrict)
+    .filter((order) => normalizeDistrict(order.district) === riderDistrict)
     .map((order) => {
       const dealerLat = Number(order.dealer_lat);
       const dealerLng = Number(order.dealer_lng);
@@ -239,7 +249,7 @@ export async function fetchPendingRiderJobs(
         mechanicLng,
         routeDistanceKm,
         riderToDealerDistanceKm,
-        earnings: Math.round(routeDistanceKm * 3.5 * 100) / 100,
+        earnings: Math.round(routeDistanceKm * 5.0 * 100) / 100,
         district: order.district ?? rider?.district ?? "",
       } satisfies PendingRiderJob;
     })

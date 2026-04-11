@@ -441,7 +441,7 @@ export function DashboardPage() {
                           </div>
                           <div className="detail-row">
                             <dt>Earnings</dt>
-                            <dd>Rs 3.5 x {job.routeDistanceKm.toFixed(1)} km = {formatCurrency(job.earnings)}</dd>
+                            <dd>Rs 5.0 x {job.routeDistanceKm.toFixed(1)} km = {formatCurrency(job.earnings)}</dd>
                           </div>
                         </div>
 
