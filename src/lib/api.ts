@@ -8,8 +8,6 @@ import type {
 } from "../types/domain";
 import { parseQuoteItems } from "./format";
 
-const supabasePublishableKey = "sb_publishable_NWP2Mv4sOeLx1Wh7oqQDkQ_CB684sw-";
-
 export class ApiError extends Error {
   status?: number;
   reason?: string;
@@ -114,9 +112,6 @@ async function edgeRequest<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        apikey: supabasePublishableKey,
-        Authorization: `Bearer ${supabasePublishableKey}`,
-        ...(options?.token ? { "x-rider-token": options.token } : {}),
         ...(init.headers ?? {}),
       },
       signal: controller.signal,
