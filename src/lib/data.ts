@@ -10,7 +10,7 @@ import type {
 } from "../types/domain";
 import { formatISTDate } from "./format";
 import { parseQuoteItems } from "./format";
-import { distanceBetweenKm, roundKm } from "./location";
+import { distanceBetweenKm, roundKm, type Coordinates } from "./location";
 import { supabase } from "./supabase";
 
 function ensureSupabase() {
@@ -151,7 +151,14 @@ export async function storeRiderOtp(phone: string, otp: string, expiresAt: strin
   }
 }
 
-export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRiderJob[]> {
+function normalizeText(value?: string | null) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+export async function fetchPendingRiderJobs(
+  riderId: string,
+  riderLocation?: Coordinates,
+): Promise<PendingRiderJob[]> {
   const client = ensureSupabase();
   const { data: rider, error: riderError } = await client
     .from("riders")
@@ -163,7 +170,11 @@ export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRid
     throw riderError;
   }
 
-  if (!rider?.district || rider.lat == null || rider.lng == null) {
+  const riderLat = riderLocation?.lat ?? (rider?.lat == null ? null : Number(rider.lat));
+  const riderLng = riderLocation?.lng ?? (rider?.lng == null ? null : Number(rider.lng));
+  const riderDistrict = normalizeText(rider?.district);
+
+  if (!riderDistrict || riderLat == null || riderLng == null || Number.isNaN(riderLat) || Number.isNaN(riderLng)) {
     throw new Error("Rider district or current location missing");
   }
 
@@ -174,7 +185,6 @@ export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRid
     )
     .eq("status", "pending_rider")
     .is("rider_id", null)
-    .eq("district", rider.district)
     .order("created_at", { ascending: false });
 
   if (ordersError) {
@@ -182,6 +192,7 @@ export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRid
   }
 
   return ((orders ?? []) as OrderRecord[])
+    .filter((order) => normalizeText(order.district) === riderDistrict)
     .map((order) => {
       const dealerLat = Number(order.dealer_lat);
       const dealerLng = Number(order.dealer_lng);
@@ -199,7 +210,7 @@ export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRid
 
       const riderToDealerDistanceKm = roundKm(
         distanceBetweenKm(
-          { lat: Number(rider.lat), lng: Number(rider.lng) },
+          { lat: riderLat, lng: riderLng },
           { lat: dealerLat, lng: dealerLng },
         ),
       );
@@ -229,7 +240,7 @@ export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRid
         routeDistanceKm,
         riderToDealerDistanceKm,
         earnings: Math.round(routeDistanceKm * 3.5 * 100) / 100,
-        district: order.district ?? rider.district,
+        district: order.district ?? rider?.district ?? "",
       } satisfies PendingRiderJob;
     })
     .filter((job): job is PendingRiderJob => Boolean(job))

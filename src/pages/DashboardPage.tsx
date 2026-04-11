@@ -11,7 +11,7 @@ import { useToast } from "../contexts/ToastContext";
 import { useNow } from "../hooks/useNow";
 import { fetchPendingRiderJobs } from "../lib/data";
 import { formatCurrency, formatDurationHours, formatISTTime, quoteItemsSummary } from "../lib/format";
-import { getGoogleMapsRouteUrl } from "../lib/location";
+import { getCurrentPosition, getGoogleMapsRouteUrl, positionToCoordinates } from "../lib/location";
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { ToggleSwitch } from "../components/shared/ToggleSwitch";
@@ -187,7 +187,16 @@ export function DashboardPage() {
     try {
       setLoadingPendingJobs(true);
       setPendingJobsLoaded(true);
-      const jobs = await fetchPendingRiderJobs(session.riderId);
+      let liveLocation;
+
+      try {
+        const position = await getCurrentPosition();
+        liveLocation = positionToCoordinates(position);
+      } catch {
+        pushToast("info", "Live location nahi mila, saved rider location se filter kar rahe hain.");
+      }
+
+      const jobs = await fetchPendingRiderJobs(session.riderId, liveLocation);
       setPendingJobs(jobs);
 
       if (jobs.length === 0) {
