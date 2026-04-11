@@ -112,6 +112,7 @@ async function edgeRequest<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
+        ...(options?.token ? { Authorization: `Bearer ${options.token}` } : {}),
         ...(init.headers ?? {}),
       },
       signal: controller.signal,
