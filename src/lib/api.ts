@@ -252,28 +252,28 @@ export async function getDashboard(session: RiderSession) {
 }
 
 export function acceptOrder(session: RiderSession, orderId: string) {
-  return request("/rider-accept-order", {
+  return edgeRequest("rider-accept-order", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, order_id: orderId }),
   }, { token: session.token });
 }
 
 export function declineOrder(session: RiderSession, orderId: string) {
-  return request("/rider-decline-order", {
+  return edgeRequest("rider-decline-order", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, order_id: orderId }),
   }, { token: session.token });
 }
 
 export function notifyArrivingPickup(session: RiderSession, orderId: string) {
-  return request("/rider-arriving-pickup", {
+  return edgeRequest("rider-arriving-pickup", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, order_id: orderId }),
   }, { token: session.token });
 }
 
 export function notifyArrivingDelivery(session: RiderSession, orderId: string) {
-  return request("/rider-arriving-delivery", {
+  return edgeRequest("rider-arriving-delivery", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, order_id: orderId }),
   }, { token: session.token });
@@ -285,7 +285,7 @@ export function confirmAtPickup(
   lat: number,
   lng: number,
 ) {
-  return request("/rider-at-pickup", {
+  return edgeRequest("rider-at-pickup", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, order_id: orderId, lat, lng }),
   }, { token: session.token });

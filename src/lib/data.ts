@@ -249,7 +249,7 @@ export async function fetchPendingRiderJobs(
         mechanicLng,
         routeDistanceKm,
         riderToDealerDistanceKm,
-        earnings: Math.round(routeDistanceKm * 5.0 * 100) / 100,
+        earnings: Math.round(routeDistanceKm * 3.0 * 100) / 100,
         district: order.district ?? rider?.district ?? "",
       } satisfies PendingRiderJob;
     })
