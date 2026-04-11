@@ -3,12 +3,14 @@ import type {
   EarningsData,
   OrderBundle,
   OrderRecord,
+  PendingRiderJob,
   QuoteItem,
   RiderProfile,
   UserShop,
 } from "../types/domain";
 import { formatISTDate } from "./format";
 import { parseQuoteItems } from "./format";
+import { distanceBetweenKm, roundKm } from "./location";
 import { supabase } from "./supabase";
 
 function ensureSupabase() {
@@ -147,6 +149,91 @@ export async function storeRiderOtp(phone: string, otp: string, expiresAt: strin
   if (error) {
     throw error;
   }
+}
+
+export async function fetchPendingRiderJobs(riderId: string): Promise<PendingRiderJob[]> {
+  const client = ensureSupabase();
+  const { data: rider, error: riderError } = await client
+    .from("riders")
+    .select("id, district, lat, lng")
+    .eq("id", riderId)
+    .maybeSingle();
+
+  if (riderError) {
+    throw riderError;
+  }
+
+  if (!rider?.district || rider.lat == null || rider.lng == null) {
+    throw new Error("Rider district or current location missing");
+  }
+
+  const { data: orders, error: ordersError } = await client
+    .from("orders")
+    .select(
+      "id, status, district, rider_id, dealer_id, mechanic_id, dealer_lat, dealer_lng, mechanic_lat, mechanic_lng, distance, delivery_fee, pick_address, drop_address, created_at",
+    )
+    .eq("status", "pending_rider")
+    .is("rider_id", null)
+    .eq("district", rider.district)
+    .order("created_at", { ascending: false });
+
+  if (ordersError) {
+    throw ordersError;
+  }
+
+  return ((orders ?? []) as OrderRecord[])
+    .map((order) => {
+      const dealerLat = Number(order.dealer_lat);
+      const dealerLng = Number(order.dealer_lng);
+      const mechanicLat = Number(order.mechanic_lat);
+      const mechanicLng = Number(order.mechanic_lng);
+
+      if (
+        Number.isNaN(dealerLat) ||
+        Number.isNaN(dealerLng) ||
+        Number.isNaN(mechanicLat) ||
+        Number.isNaN(mechanicLng)
+      ) {
+        return null;
+      }
+
+      const riderToDealerDistanceKm = roundKm(
+        distanceBetweenKm(
+          { lat: Number(rider.lat), lng: Number(rider.lng) },
+          { lat: dealerLat, lng: dealerLng },
+        ),
+      );
+
+      if (riderToDealerDistanceKm > 20) {
+        return null;
+      }
+
+      const parsedOrderDistance = Number(order.distance);
+      const routeDistanceKm = roundKm(
+        Number.isFinite(parsedOrderDistance) && parsedOrderDistance > 0
+          ? parsedOrderDistance
+          : distanceBetweenKm(
+              { lat: dealerLat, lng: dealerLng },
+              { lat: mechanicLat, lng: mechanicLng },
+            ),
+      );
+
+      return {
+        id: order.id,
+        pickAddress: order.pick_address ?? "Pickup address pending",
+        dropAddress: order.drop_address ?? "Drop address pending",
+        dealerLat,
+        dealerLng,
+        mechanicLat,
+        mechanicLng,
+        routeDistanceKm,
+        riderToDealerDistanceKm,
+        earnings: Math.round(routeDistanceKm * 3.5 * 100) / 100,
+        district: order.district ?? rider.district,
+      } satisfies PendingRiderJob;
+    })
+    .filter((job): job is PendingRiderJob => Boolean(job))
+    .sort((a, b) => a.riderToDealerDistanceKm - b.riderToDealerDistanceKm);
 }
 
 export async function fetchEarnings(riderId: string, offset = 0, limit = 20): Promise<EarningsData> {

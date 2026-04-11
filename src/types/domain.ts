@@ -58,10 +58,16 @@ export interface QuoteItem {
 export interface OrderRecord {
   id: string;
   rider_id?: string | null;
+  request_id?: string | null;
   quote_id?: string | null;
   status: OrderStatus | string;
+  order_status?: string | null;
   mechanic_id?: string | null;
   dealer_id?: string | null;
+  amount?: number | string | null;
+  total_amount?: number | string | null;
+  payment_status?: string | null;
+  platform_fee?: number | string | null;
   pickup_photo_id?: string | null;
   delivery_photo_id?: string | null;
   pickup_confirmed_at?: string | null;
@@ -74,6 +80,10 @@ export interface OrderRecord {
   dealer_lng?: number | null;
   mechanic_lat?: number | null;
   mechanic_lng?: number | null;
+  distance?: number | string | null;
+  pick_address?: string | null;
+  drop_address?: string | null;
+  district?: string | null;
   dealer_paid_at?: string | null;
   rider_paid_at?: string | null;
   created_at?: string | null;
@@ -155,4 +165,18 @@ export interface ApiEnvelope<T> {
   message?: string;
   data?: T;
   [key: string]: unknown;
+}
+
+export interface PendingRiderJob {
+  id: string;
+  pickAddress: string;
+  dropAddress: string;
+  dealerLat: number;
+  dealerLng: number;
+  mechanicLat: number;
+  mechanicLng: number;
+  routeDistanceKm: number;
+  riderToDealerDistanceKm: number;
+  earnings: number;
+  district: string;
 }

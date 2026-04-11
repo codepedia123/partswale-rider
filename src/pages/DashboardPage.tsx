@@ -9,13 +9,15 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useNow } from "../hooks/useNow";
+import { fetchPendingRiderJobs } from "../lib/data";
 import { formatCurrency, formatDurationHours, formatISTTime, quoteItemsSummary } from "../lib/format";
+import { getGoogleMapsRouteUrl } from "../lib/location";
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { ToggleSwitch } from "../components/shared/ToggleSwitch";
 import { EmptyState } from "../components/shared/EmptyState";
 import { supabase } from "../lib/supabase";
-import type { DashboardData, IncomingRequest } from "../types/domain";
+import type { DashboardData, IncomingRequest, PendingRiderJob } from "../types/domain";
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -26,6 +28,10 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [updatingToggle, setUpdatingToggle] = useState(false);
   const [actioningRequest, setActioningRequest] = useState<string | null>(null);
+  const [pendingJobs, setPendingJobs] = useState<PendingRiderJob[]>([]);
+  const [loadingPendingJobs, setLoadingPendingJobs] = useState(false);
+  const [pendingJobsLoaded, setPendingJobsLoaded] = useState(false);
+  const [takingJobId, setTakingJobId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -173,6 +179,68 @@ export function DashboardPage() {
     }
   }
 
+  async function refreshPendingJobs() {
+    if (!session) {
+      return;
+    }
+
+    try {
+      setLoadingPendingJobs(true);
+      setPendingJobsLoaded(true);
+      const jobs = await fetchPendingRiderJobs(session.riderId);
+      setPendingJobs(jobs);
+
+      if (jobs.length === 0) {
+        pushToast("info", "20 km radius mein koi pending rider job nahi mila.");
+      }
+    } catch (error) {
+      pushToast("error", getErrorMessage(error));
+    } finally {
+      setLoadingPendingJobs(false);
+    }
+  }
+
+  async function takePendingJob(job: PendingRiderJob) {
+    if (!session) {
+      return;
+    }
+
+    try {
+      setTakingJobId(job.id);
+      await acceptOrder(session, job.id);
+      setActiveOrderId(job.id);
+      setPendingJobs((current) => current.filter((item) => item.id !== job.id));
+      pushToast("success", "Job le liya");
+      navigate(`/order/${job.id}`);
+    } catch (error) {
+      if (isAuthError(error)) {
+        clearSession();
+        navigate("/login", { replace: true });
+        return;
+      }
+
+      pushToast("error", getErrorMessage(error));
+    } finally {
+      setTakingJobId(null);
+    }
+  }
+
+  function viewPendingJobOnMap(job: PendingRiderJob) {
+    const routeUrl = getGoogleMapsRouteUrl(
+      job.dealerLat,
+      job.dealerLng,
+      job.mechanicLat,
+      job.mechanicLng,
+    );
+
+    if (!routeUrl) {
+      pushToast("error", "Map route ke liye location missing hai");
+      return;
+    }
+
+    window.open(routeUrl, "_blank", "noopener,noreferrer");
+  }
+
   return (
     <main className="page">
       <section className="page__hero">
@@ -310,6 +378,98 @@ export function DashboardPage() {
                   copy="Online rahein aur requests ka intezaar karein."
                 />
               ) : null}
+
+              <div className="card stack">
+                <div className="card__header">
+                  <div>
+                    <p className="eyebrow">requests</p>
+                    <h2 className="section-title">Nearby pending rider jobs</h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={refreshPendingJobs}
+                    disabled={loadingPendingJobs}
+                  >
+                    {loadingPendingJobs ? "Refreshing..." : "Refresh Requests"}
+                  </button>
+                </div>
+                <p className="section-copy">
+                  Matching orders: status pending_rider, same district, and dealer pickup within 20 km of your current rider location.
+                </p>
+
+                {loadingPendingJobs ? (
+                  <div className="stack">
+                    <div className="skeleton" />
+                    <div className="skeleton" />
+                  </div>
+                ) : pendingJobs.length > 0 ? (
+                  <div className="stack">
+                    {pendingJobs.map((job) => (
+                      <article className="list-item stack" key={job.id}>
+                        <div className="card__header">
+                          <div>
+                            <p className="eyebrow">{job.district}</p>
+                            <h3 className="section-title" style={{ fontSize: "1rem" }}>
+                              {job.routeDistanceKm.toFixed(1)} km route
+                            </h3>
+                          </div>
+                          <span className="pill pill--success">{formatCurrency(job.earnings)}</span>
+                        </div>
+
+                        <div className="detail-list">
+                          <div className="detail-row">
+                            <dt>Pickup address</dt>
+                            <dd>{job.pickAddress}</dd>
+                          </div>
+                          <div className="detail-row">
+                            <dt>Drop address</dt>
+                            <dd>{job.dropAddress}</dd>
+                          </div>
+                          <div className="detail-row">
+                            <dt>Rider to dealer</dt>
+                            <dd>{job.riderToDealerDistanceKm.toFixed(1)} km away</dd>
+                          </div>
+                          <div className="detail-row">
+                            <dt>Earnings</dt>
+                            <dd>Rs 3.5 x {job.routeDistanceKm.toFixed(1)} km = {formatCurrency(job.earnings)}</dd>
+                          </div>
+                        </div>
+
+                        <div className="button-row">
+                          <button
+                            type="button"
+                            className="button button--success"
+                            onClick={() => takePendingJob(job)}
+                            disabled={takingJobId === job.id}
+                          >
+                            {takingJobId === job.id ? "Taking..." : "Take Job"}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button--secondary"
+                            onClick={() => viewPendingJobOnMap(job)}
+                          >
+                            View on Map
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : pendingJobsLoaded ? (
+                  <EmptyState
+                    icon="📍"
+                    title="Matching request nahi mila"
+                    copy="Same district aur 20 km dealer radius mein pending_rider order nahi hai."
+                  />
+                ) : (
+                  <EmptyState
+                    icon="🔄"
+                    title="Requests refresh karein"
+                    copy="Nearby pending_rider orders DB se fetch karne ke liye Refresh Requests dabayein."
+                  />
+                )}
+              </div>
 
               <div className="card stack">
                 <div className="card__header">

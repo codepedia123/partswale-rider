@@ -20,6 +20,39 @@ export function distanceBetweenMeters(origin: Coordinates, target: Coordinates) 
   return earthRadius * c;
 }
 
+export function distanceBetweenKm(origin: Coordinates, target: Coordinates) {
+  return distanceBetweenMeters(origin, target) / 1000;
+}
+
+export function roundKm(distanceKm: number) {
+  return Math.round(distanceKm * 10) / 10;
+}
+
+export function getGoogleMapsRouteUrl(
+  originLat?: number | null,
+  originLng?: number | null,
+  destinationLat?: number | null,
+  destinationLng?: number | null,
+) {
+  if (
+    originLat == null ||
+    originLng == null ||
+    destinationLat == null ||
+    destinationLng == null
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    api: "1",
+    origin: `${originLat},${originLng}`,
+    destination: `${destinationLat},${destinationLng}`,
+    travelmode: "driving",
+  });
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
 export function openGoogleMaps(lat?: number | null, lng?: number | null) {
   if (lat == null || lng == null) {
     return;
