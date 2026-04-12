@@ -296,7 +296,7 @@ export function confirmAtDelivery(
   lat: number,
   lng: number,
 ) {
-  return request("/rider-at-delivery", {
+  return edgeRequest("rider-at-delivery", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, order_id: orderId, lat, lng }),
   }, { token: session.token });
@@ -313,7 +313,7 @@ export function confirmPhoto(
     captured_at: string;
   },
 ) {
-  return request("/rider-confirm-photo", {
+  return edgeRequest("rider-confirm-photo", {
     method: "POST",
     body: JSON.stringify({ rider_id: session.riderId, ...payload }),
   }, { token: session.token });
@@ -360,13 +360,13 @@ export async function getSignedPhotoUploadUrl(
   contentType: string,
 ) {
   try {
-    return await request<{
+    return await edgeRequest<{
       upload_url?: string;
       signed_url?: string;
       path?: string;
       image_url?: string;
       file_url?: string;
-    }>("/rider-photo-upload-url", {
+    }>("rider-photo-upload-url", {
       method: "POST",
       body: JSON.stringify({ rider_id: session.riderId, order_id: orderId, type, content_type: contentType }),
     }, { token: session.token });

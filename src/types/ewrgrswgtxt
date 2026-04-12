@@ -1,0 +1,1961 @@
+
+Create Edge Function: rider-verify-otp
+
+Method:
+- POST
+
+Input JSON:
+- { "phone": "917209463686", "otp": "123456" }
+
+Workflow:
+1. Validate input.
+2. Query riders by phone.
+3. If rider missing, return not_registered.
+4. Check otp matches.
+5. Check otp_expires_at > now.
+6. If invalid, return:
+   - { "success": false, "reason": "invalid_otp", "message": "OTP galat hai ya expire ho gaya" }
+7. Generate a UUID session token.
+8. Update riders.session_token = generated token.
+9. Clear riders.otp and riders.otp_expires_at.
+10. Return:
+   - { "success": true, "token": "<uuid>", "rider_id": "<uuid>", "name": "<rider name>" }
+text
+
+Create Edge Function: rider-dashboard
+
+Method:
+- GET
+
+Query params:
+- rider_id=<uuid>
+
+Auth:
+- required
+
+Workflow:
+1. Validate bearer token and rider.
+2. Ensure rider_id in query matches authenticated rider.id.
+3. Fetch rider is_online.
+4. Fetch active order for rider where status in:
+   - rider_assigned
+   - rider_at_pickup
+   - picked_up
+   - rider_at_delivery
+   - delivered
+5. If active order exists:
+   - also fetch dealer user
+   - fetch mechanic user
+   - fetch quote details
+6. Fetch incoming requests for this rider if your schema supports it.
+   - if not available yet, return empty array
+7. Compute today stats:
+   - deliveries_today
+   - earnings_today
+   - online_hours
+   - if online hours cannot be computed yet, return 0
+8. Return:
+   - { success, active_order, incoming_requests, today_stats, is_online }
+
+Keep response shape aligned with frontend expectations.
+text
+
+Create Edge Function: rider-toggle-online
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "is_online": true|false }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and match rider_id.
+2. If turning offline:
+   - check if active order exists for rider
+   - if yes, reject with reason "active_order_exists"
+3. Update riders.is_online.
+4. Return:
+   - { "success": true, "is_online": true|false }
+text
+
+Create Edge Function: rider-accept-order
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>" }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Load order.
+3. Reject if already assigned to another rider or already in later status.
+4. In one safe transactional flow:
+   - set orders.rider_id = rider_id
+   - set orders.status = 'rider_assigned'
+5. Fetch dealer and mechanic phones if needed.
+6. Send WhatsApp notifications to dealer and mechanic that rider has been assigned.
+7. Return:
+   - { "success": true, "order_id": "<uuid>", "status": "rider_assigned" }
+
+On conflict:
+- return reason "order_taken"
+text
+
+Create Edge Function: rider-decline-order
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>" }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Mark this rider as declined for the request if such schema exists.
+3. If schema does not exist yet, return success with no-op but clear reason in code comments.
+4. Return:
+   - { "success": true }
+text
+
+Create Edge Function: rider-arriving-pickup
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>" }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Load order + dealer.
+3. Verify order belongs to rider and status is rider_assigned.
+4. Send WhatsApp text to dealer:
+   - rider is on the way
+5. Return:
+   - { "success": true }
+text
+
+Create Edge Function: rider-arriving-delivery
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>" }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Load order + mechanic.
+3. Verify order belongs to rider and status is picked_up.
+4. Send WhatsApp text to mechanic:
+   - rider is on the way
+5. Return success.
+text
+
+Create Edge Function: rider-at-pickup
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>", "lat": 12.34, "lng": 56.78 }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Load order.dealer_lat and order.dealer_lng.
+3. Verify rider owns the order and status = rider_assigned.
+4. Compute distance from submitted coords to dealer coords.
+5. If distance > 50 meters:
+   - return reason "out_of_geofence"
+6. Update orders.status = 'rider_at_pickup'
+7. Update orders.pickup_confirmed_at = now if appropriate for your flow.
+8. Notify dealer via WhatsApp.
+9. Return:
+   - { "success": true, "status": "rider_at_pickup" }
+text
+
+Create Edge Function: rider-at-delivery
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>", "lat": 12.34, "lng": 56.78 }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Load order.mechanic_lat and order.mechanic_lng.
+3. Verify order belongs to rider and status = picked_up.
+4. Geofence validate within 50 meters.
+5. If fail, return out_of_geofence.
+6. Update orders.status = 'rider_at_delivery'
+7. Notify mechanic via WhatsApp.
+8. Return success.
+text
+
+Create Edge Function: rider-photo-upload-url
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>", "type": "pickup"|"delivery", "content_type": "image/jpeg" }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Validate order belongs to rider.
+3. Validate type.
+4. Construct storage path:
+   - <order_id>/<type>_<unix_timestamp>.jpg
+5. Create signed upload URL for private bucket order-photos.
+6. Return:
+   - { "success": true, "upload_url": "...", "path": "...", "file_url": "..." }
+
+Do not upload file in this function.
+text
+
+Create Edge Function: rider-confirm-photo
+
+Method:
+- POST
+
+Input JSON:
+- {
+    "rider_id": "<uuid>",
+    "order_id": "<uuid>",
+    "type": "pickup"|"delivery",
+    "image_url": "<storage or signed url>",
+    "lat": 12.34,
+    "lng": 56.78,
+    "captured_at": "<iso>"
+  }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Load order.
+3. Validate order belongs to rider.
+4. Validate captured_at is within last 3 minutes.
+5. For pickup:
+   - verify order.status is rider_at_pickup
+   - verify dealer_confirmed_handoff = true if your flow requires it
+   - geofence against dealer coordinates
+6. For delivery:
+   - verify order.status is rider_at_delivery
+   - geofence against mechanic coordinates
+7. If geofence fails, return reason out_of_geofence.
+8. Insert row into photos:
+   - order_id
+   - rider_id
+   - type
+   - image_url
+   - lat
+   - lng
+   - captured_at
+   - validated = true
+9. Update orders:
+   - pickup_photo_id or delivery_photo_id
+   - if pickup: status = picked_up
+   - if delivery: status = delivered and auto_confirm_at = now + 4 hours
+10. Return:
+   - { "success": true, "status": "<new status>" }
+text
+
+Create Edge Function: rider-raise-issue
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "order_id": "<uuid>", "issue_type": "order_issue"|"location_issue", "note": "..." }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Insert into rider_issues.
+3. Return success with created issue id.
+text
+
+Create Edge Function: rider-update-profile
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "vehicle_type": "...", "district": "..." }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Update vehicle_type directly on riders.
+3. If district changed:
+   - create rider_profile_change_requests row with status pending
+   - do not overwrite riders.district directly unless explicitly configured
+4. Return success.
+text
+
+Create Edge Function: rider-update-android-id
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>", "android_id": "..." }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Update riders.android_id.
+3. Return success.
+text
+
+Create Edge Function: rider-logout
+
+Method:
+- POST
+
+Input JSON:
+- { "rider_id": "<uuid>" }
+
+Auth:
+- required
+
+Workflow:
+1. Validate token and rider.
+2. Update riders.session_token = null.
+3. Return success.
+Implementation Constraints Prompt
+
+text
+
+Implementation constraints:
+- Do not invent fields not present in schema unless absolutely necessary.
+- If a field or table is missing, call it out explicitly in comments or README.
+- Keep functions small and share helpers.
+- Add a common auth helper that:
+  - reads bearer token
+  - queries riders.session_token
+  - returns rider row
+- Add a common distance helper using Haversine formula.
+- Add a common WhatsApp sender helper with environment secrets:
+  - WHATSAPP_ACCESS_TOKEN
+  - WHATSAPP_PHONE_NUMBER_ID
+- For signed upload URLs, use Supabase Storage server-side APIs.
+- Return exact reason codes expected by frontend:
+  - not_registered
+  - invalid_otp
+  - invalid_session
+  - out_of_geofence
+  - order_taken
+  - active_order_exists
+  - server_error
+- Include a README section showing:
+  - function names
+  - required env vars
+  - example curl for each
+What to Tell the Assistant to Output
+
+text
+
+Deliverables:
+1. full Edge Function code for all functions
+2. shared helper modules
+3. env var list
+4. deployment commands
+5. any required SQL migrations if implementation reveals missing columns/tables
+6. example request/response payloads for every function
+7. notes on any schema mismatch found during implementation
+
+
+
+CODE OF ALL EDGE FUCNTIONS:
+
+rider-accept-order
+
+Deploy
+// Supabase Edge Function: rider-accept-order
+// POST { rider_id: <uuid>, order_id: <uuid> }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = { rider_id: string; order_id: string };
+
+type ApiOk = { success: true; order_id: string; status: string };
+type ApiFail = { success: false; reason: string; message?: string };
+
+type Rider = { id: string; session_token?: string | null };
+
+type Order = {
+  id: string;
+  rider_id: string | null;
+  status: string;
+  dealer_id: string;
+  mechanic_id: string;
+};
+
+type UserPhone = { phone: string | null };
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiOk | ApiFail, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000; // meters
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function sendWhatsAppText(phone: string, text: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: phone,
+    type: "text",
+    text: { body: text },
+  };
+
+  const res = await fetch(
+    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`whatsapp_failed: ${res.status} ${txt}`);
+  }
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") {
+      return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+    }
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (!parsed.ok || !parsed.value?.rider_id || !parsed.value?.order_id) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id }" }, 400);
+    }
+
+    const rider_id = String(parsed.value.rider_id);
+    const order_id = String(parsed.value.order_id);
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const authedRider = await requireAuthRider(supabase, req);
+    if (authedRider.id !== rider_id) {
+      return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+    }
+
+    // Load order
+    const { data: order, error: orderErr } = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id,status,dealer_id,mechanic_id")
+        .eq("id", order_id)
+        .maybeSingle(),
+      8000,
+    );
+    if (orderErr) throw orderErr;
+    if (!order) {
+      return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+    }
+
+    // Reject if already assigned or in later status
+    const laterStatuses = [
+      "rider_assigned",
+      "rider_at_pickup",
+      "picked_up",
+      "in_transit",
+      "rider_at_delivery",
+      "delivered",
+      "disputed",
+      "completed",
+      "cancelled",
+    ];
+
+    const isLater = laterStatuses.includes(order.status);
+    if (order.rider_id !== null || isLater || order.status !== "pending_rider") {
+      return jsonResponse({ success: false, reason: "order_taken" }, 409);
+    }
+
+    // One safe transactional flow:
+    // Atomically assign only if still unassigned + pending_rider.
+    const { data: updatedRows, error: updErr } = await withTimeout(
+      supabase
+        .from("orders")
+        .update({ rider_id, status: "rider_assigned" })
+        .eq("id", order_id)
+        .is("rider_id", null)
+        .eq("status", "pending_rider")
+        .select("id"),
+      8000,
+    );
+    if (updErr) throw updErr;
+    if (!updatedRows || updatedRows.length === 0) {
+      return jsonResponse({ success: false, reason: "order_taken" }, 409);
+    }
+
+    // Fetch dealer & mechanic phones
+    const { data: dealerPhoneData, error: dealerErr } = await withTimeout(
+      supabase.from("users").select("phone").eq("id", order.dealer_id).maybeSingle(),
+      8000,
+    );
+    if (dealerErr) throw dealerErr;
+
+    const { data: mechanicPhoneData, error: mechErr } = await withTimeout(
+      supabase.from("users").select("phone").eq("id", order.mechanic_id).maybeSingle(),
+      8000,
+    );
+    if (mechErr) throw mechErr;
+
+    const dealerPhone = (dealerPhoneData as UserPhone | null)?.phone;
+    const mechanicPhone = (mechanicPhoneData as UserPhone | null)?.phone;
+
+    const dealerMsg = `Your order ${order_id} has been assigned to a rider.`;
+    const mechMsg = `Your order ${order_id} rider has been assigned.`;
+
+    // Send WhatsApp notifications
+    await Promise.all([
+      dealerPhone ? sendWhatsAppText(dealerPhone, dealerMsg) : Promise.resolve(),
+      mechanicPhone ? sendWhatsAppText(mechanicPhone, mechMsg) : Promise.resolve(),
+    ]);
+
+    return jsonResponse({ success: true, order_id, status: "rider_assigned" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-accept-order error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-accept-order
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-accept-order
+
+rider-decline-order
+
+Deploy
+// Supabase Edge Function: rider-decline-order
+// POST { rider_id: <uuid>, order_id: <uuid> }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = { rider_id: string; order_id: string };
+type ApiOk = { success: true };
+type ApiFail = { success: false; reason: string; message?: string };
+
+type Rider = { id: string; session_token?: string | null };
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiOk | ApiFail, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") {
+      return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+    }
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (!parsed.ok || !parsed.value?.rider_id || !parsed.value?.order_id) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id }" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    const { rider_id, order_id } = parsed.value;
+
+    if (String(rider.id) !== String(rider_id)) {
+      return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+    }
+
+    // Step 2: Mark this rider as declined for the request if such schema exists.
+    // NOTE: we check for presence of a known table/column.
+    // If your schema does not exist yet, we must return success with a no-op.
+
+    // We look for a table named rider_declines (id, rider_id, order_id).
+    // If it doesn't exist in your DB, the insert will fail; then we no-op.
+    try {
+      const { error: insErr } = await supabase
+        .from("rider_declines")
+        .insert({ rider_id, order_id });
+
+      if (insErr) {
+        // If table doesn't exist, swallow and no-op per requirements.
+        console.warn("rider-decline-order insert failed, no-op per spec:", insErr.message);
+      }
+    } catch (e) {
+      console.warn("rider-decline-order no-op (declines schema missing):", e);
+      // clear reason in code comments (already here)
+    }
+
+    return jsonResponse({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-decline-order error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-decline-order
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-decline-order
+
+
+Reasoned
+rider-arriving-pickup
+
+Deploy
+// Supabase Edge Function: rider-arriving-pickup
+// POST { rider_id: <uuid>, order_id: <uuid> }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = { rider_id: string; order_id: string };
+type ApiOk = { success: true };
+type ApiFail = { success: false; reason: string; message?: string };
+
+type Rider = { id: string; session_token?: string | null };
+
+type Order = {
+  id: string;
+  rider_id: string | null;
+  status: string;
+  dealer_id: string;
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiOk | ApiFail, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+async function sendWhatsAppText(phone: string, text: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: phone,
+    type: "text",
+    text: { body: text },
+  };
+
+  const res = await fetch(
+    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`whatsapp_failed: ${res.status} ${txt}`);
+  }
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (!parsed.ok || !parsed.value?.rider_id || !parsed.value?.order_id) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id }" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    if (String(rider.id) !== String(parsed.value.rider_id)) {
+      return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+    }
+
+    const order = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id,status,dealer_id")
+        .eq("id", parsed.value.order_id)
+        .maybeSingle<Order>(),
+      8000,
+    );
+
+    const { data: orderData, error: orderErr } = order as any;
+    if (orderErr) throw orderErr;
+    if (!orderData) return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+    const o = orderData as Order;
+
+    if (o.rider_id !== rider.id || o.status !== "rider_assigned") {
+      return jsonResponse({ success: false, reason: "invalid_order_state" }, 409);
+    }
+
+    // Load dealer phone
+    const { data: dealerPhoneData, error: dealerErr } = await withTimeout(
+      supabase.from("users").select("phone").eq("id", o.dealer_id).maybeSingle(),
+      8000,
+    );
+    if (dealerErr) throw dealerErr;
+
+    const dealerPhone = (dealerPhoneData as { phone: string | null } | null)?.phone;
+    if (dealerPhone) {
+      await sendWhatsAppText(dealerPhone, "Rider is on the way to pickup.");
+    }
+
+    return jsonResponse({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-arriving-pickup error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-arriving-pickup
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-arriving-pickup
+
+rider-arriving-delivery
+
+Deploy
+// Supabase Edge Function: rider-arriving-delivery
+// POST { rider_id: <uuid>, order_id: <uuid> }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = { rider_id: string; order_id: string };
+type ApiOk = { success: true };
+type ApiFail = { success: false; reason: string; message?: string };
+type Rider = { id: string; session_token?: string | null };
+type Order = { id: string; rider_id: string | null; status: string; mechanic_id: string };
+
+type UserPhone = { phone: string | null };
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiOk | ApiFail, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+async function sendWhatsAppText(phone: string, text: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+
+  const body = {
+    messaging_product: "whatsapp",
+    to: phone,
+    type: "text",
+    text: { body: text },
+  };
+
+  const res = await fetch(
+    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`whatsapp_failed: ${res.status} ${txt}`);
+  }
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (!parsed.ok || !parsed.value?.rider_id || !parsed.value?.order_id) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id }" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    if (String(rider.id) !== String(parsed.value.rider_id)) {
+      return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+    }
+
+    const orderData = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id,status,mechanic_id")
+        .eq("id", parsed.value.order_id)
+        .maybeSingle<Order>(),
+      8000,
+    );
+
+    const o = (orderData as any) as Order | null;
+    const err = (orderData as any)?.error;
+    if (err) throw err;
+    if (!o) return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+
+    if (o.rider_id !== rider.id || o.status !== "picked_up") {
+      return jsonResponse({ success: false, reason: "invalid_order_state" }, 409);
+    }
+
+    const { data: mechanicPhoneData, error: mechErr } = await withTimeout(
+      supabase.from("users").select("phone").eq("id", o.mechanic_id).maybeSingle<UserPhone>(),
+      8000,
+    );
+    if (mechErr) throw mechErr;
+
+    const mechanicPhone = mechanicPhoneData?.phone;
+    if (mechanicPhone) {
+      await sendWhatsAppText(mechanicPhone, "Rider is on the way to delivery.");
+    }
+
+    return jsonResponse({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-arriving-delivery error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-arriving-delivery
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-arriving-delivery
+
+
+Reasoned
+rider-at-pickup
+
+Deploy
+// Supabase Edge Function: rider-at-pickup
+// POST { rider_id: <uuid>, order_id: <uuid>, lat: 12.34, lng: 56.78 }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = { rider_id: string; order_id: string; lat: number; lng: number };
+type ApiOk = { success: true; status: string };
+type ApiFail = { success: false; reason: string; message?: string };
+type ApiAny = ApiOk | ApiFail;
+
+type Rider = { id: string; session_token?: string | null };
+
+type Order = {
+  id: string;
+  rider_id: string | null;
+  status: string;
+  dealer_id: string;
+  dealer_lat: number | null;
+  dealer_lng: number | null;
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiAny, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+async function sendWhatsAppText(phone: string, text: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+
+  const res = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body: text } }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`whatsapp_failed: ${res.status} ${txt}`);
+  }
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (!parsed.ok || !parsed.value?.rider_id || !parsed.value?.order_id || typeof parsed.value?.lat !== "number" || typeof parsed.value?.lng !== "number") {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id, lat, lng }" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    if (String(rider.id) !== String(parsed.value.rider_id)) return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+
+    const o = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id,status,dealer_id,dealer_lat,dealer_lng")
+        .eq("id", parsed.value.order_id)
+        .maybeSingle<Order>(),
+      8000,
+    );
+
+    const order = (o as any) as Order | null;
+    const err = (o as any)?.error;
+    if (err) throw err;
+    if (!order) return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+
+    if (order.rider_id !== rider.id || order.status !== "rider_assigned") {
+      return jsonResponse({ success: false, reason: "invalid_order_state" }, 409);
+    }
+
+    if (order.dealer_lat === null || order.dealer_lng === null) {
+      return jsonResponse({ success: false, reason: "missing_dealer_coordinates" }, 400);
+    }
+
+    const dist = haversineMeters(parsed.value.lat, parsed.value.lng, order.dealer_lat, order.dealer_lng);
+    if (dist > 50) return jsonResponse({ success: false, reason: "out_of_geofence" }, 200);
+
+    await withTimeout(
+      supabase
+        .from("orders")
+        .update({ status: "rider_at_pickup", pickup_confirmed_at: "now()" as any })
+        .eq("id", order.id),
+      8000,
+    );
+
+    const { data: dealerPhoneData, error: dealerErr } = await withTimeout(
+      supabase.from("users").select("phone").eq("id", order.dealer_id).maybeSingle(),
+      8000,
+    );
+    if (dealerErr) throw dealerErr;
+
+    const dealerPhone = (dealerPhoneData as { phone: string | null } | null)?.phone;
+    if (dealerPhone) {
+      await sendWhatsAppText(dealerPhone, "Rider has arrived at pickup.");
+    }
+
+    return jsonResponse({ success: true, status: "rider_at_pickup" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-at-pickup error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-at-pickup
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-at-pickup
+
+rider-at-delivery
+
+Deploy
+// Supabase Edge Function: rider-at-delivery
+// POST { rider_id: <uuid>, order_id: <uuid>, lat: 12.34, lng: 56.78 }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = { rider_id: string; order_id: string; lat: number; lng: number };
+type ApiOk = { success: true };
+type ApiFail = { success: false; reason: string; message?: string };
+
+type ApiAny = ApiOk | (ApiOk & any) | ApiFail;
+
+type Rider = { id: string; session_token?: string | null };
+
+type Order = {
+  id: string;
+  rider_id: string | null;
+  status: string;
+  mechanic_id: string;
+  mechanic_lat: number | null;
+  mechanic_lng: number | null;
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: any, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function sendWhatsAppText(phone: string, text: string) {
+  const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
+  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
+  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+
+  const res = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ messaging_product: "whatsapp", to: phone, type: "text", text: { body: text } }),
+  });
+
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`whatsapp_failed: ${res.status} ${txt}`);
+  }
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (
+      !parsed.ok ||
+      !parsed.value?.rider_id ||
+      !parsed.value?.order_id ||
+      typeof parsed.value?.lat !== "number" ||
+      typeof parsed.value?.lng !== "number"
+    ) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id, lat, lng }" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    if (String(rider.id) !== String(parsed.value.rider_id)) return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+
+    const orderQ = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id,status,mechanic_id,mechanic_lat,mechanic_lng")
+        .eq("id", parsed.value.order_id)
+        .maybeSingle<Order>(),
+      8000,
+    );
+
+    const order = (orderQ as any) as Order | null;
+    const err = (orderQ as any)?.error;
+    if (err) throw err;
+    if (!order) return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+
+    if (order.rider_id !== rider.id || order.status !== "picked_up") {
+      return jsonResponse({ success: false, reason: "invalid_order_state" }, 409);
+    }
+
+    if (order.mechanic_lat === null || order.mechanic_lng === null) {
+      return jsonResponse({ success: false, reason: "missing_mechanic_coordinates" }, 400);
+    }
+
+    const dist = haversineMeters(parsed.value.lat, parsed.value.lng, order.mechanic_lat, order.mechanic_lng);
+    if (dist > 50) return jsonResponse({ success: false, reason: "out_of_geofence" }, 200);
+
+    await withTimeout(
+      supabase
+        .from("orders")
+        .update({ status: "rider_at_delivery" })
+        .eq("id", order.id),
+      8000,
+    );
+
+    const { data: mechanicPhoneData, error: mechErr } = await withTimeout(
+      supabase.from("users").select("phone").eq("id", order.mechanic_id).maybeSingle(),
+      8000,
+    );
+    if (mechErr) throw mechErr;
+
+    const mechanicPhone = (mechanicPhoneData as { phone: string | null } | null)?.phone;
+    if (mechanicPhone) await sendWhatsAppText(mechanicPhone, "Rider has arrived at delivery.");
+
+    return jsonResponse({ success: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-at-delivery error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-at-delivery
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-at-delivery
+
+
+Reasoned
+rider-photo-upload-url
+
+Deploy
+// Supabase Edge Function: rider-photo-upload-url
+// POST { rider_id, order_id, type: 'pickup'|'delivery', content_type }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = {
+  rider_id: string;
+  order_id: string;
+  type: "pickup" | "delivery";
+  content_type: string;
+};
+
+type ApiOk = { success: true; upload_url: string; path: string; file_url: string };
+type ApiFail = { success: false; reason: string; message?: string };
+
+type ApiAny = ApiOk | ApiFail;
+
+type Rider = { id: string; session_token?: string | null };
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiAny, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (!parsed.ok || !parsed.value?.rider_id || !parsed.value?.order_id || !parsed.value?.type || !parsed.value?.content_type) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Expected { rider_id, order_id, type, content_type }" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    if (String(rider.id) !== String(parsed.value.rider_id)) return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+
+    // Validate order belongs to rider
+    const { data: order, error: orderErr } = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id")
+        .eq("id", parsed.value.order_id)
+        .maybeSingle(),
+      8000,
+    );
+    if (orderErr) throw orderErr;
+    if (!order) return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+    if (order.rider_id !== rider.id) return jsonResponse({ success: false, reason: "order_mismatch" }, 403);
+
+    const type = parsed.value.type;
+    const unix = Math.floor(Date.now() / 1000);
+    const path = `${parsed.value.order_id}/${type}_${unix}.jpg`;
+
+    const bucket = supabase.storage.from("order-photos");
+    const { data, error: signErr } = await withTimeout(
+      bucket.createSignedUploadUrl(path, 60, { contentType: parsed.value.content_type }),
+      8000,
+    );
+    if (signErr) throw signErr;
+    const upload_url = data.signedUrl;
+
+    // file_url for convenience (may require signing depending on your bucket policies)
+    const file_url = `${supabaseUrl}/storage/v1/object/public/order-photos/${encodeURIComponent(path)}`;
+
+    return jsonResponse({
+      success: true,
+      upload_url,
+      path,
+      file_url,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-photo-upload-url error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-photo-upload-url
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-photo-upload-url
+
+rider-confirm-photo
+
+Deploy
+// Supabase Edge Function: rider-confirm-photo
+// POST { rider_id, order_id, type, image_url, lat, lng, captured_at }
+
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { createClient } from "npm:@supabase/supabase-js@2.45.3";
+
+type JsonBody = {
+  rider_id: string;
+  order_id: string;
+  type: "pickup" | "delivery";
+  image_url: string;
+  lat: number;
+  lng: number;
+  captured_at: string;
+};
+
+type ApiOk = { success: true; status: string };
+type ApiFail = { success: false; reason: string; message?: string };
+
+type Rider = { id: string; session_token?: string | null };
+
+type Order = {
+  id: string;
+  rider_id: string | null;
+  status: string;
+  dealer_lat: number | null;
+  dealer_lng: number | null;
+  mechanic_lat: number | null;
+  mechanic_lng: number | null;
+  dealer_confirmed_handoff: boolean | null;
+};
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+function jsonResponse(body: ApiOk | ApiFail, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Connection": "keep-alive",
+      ...corsHeaders,
+    },
+  });
+}
+
+function safeJsonParse<T>(text: string): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function getBearerToken(req: Request): string | null {
+  const h = req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1] : null;
+}
+
+async function requireAuthRider(supabase: ReturnType<typeof createClient>, req: Request): Promise<Rider> {
+  const token = getBearerToken(req);
+  if (!token) throw new Error("unauthorized");
+
+  const { data, error } = await supabase
+    .from("riders")
+    .select("id,session_token")
+    .eq("session_token", token)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("unauthorized");
+  return data as Rider;
+}
+
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    }).catch((e) => {
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  try {
+    if (req.method !== "POST") return jsonResponse({ success: false, reason: "method_not_allowed" }, 405);
+
+    const parsed = safeJsonParse<JsonBody>(await req.text());
+    if (
+      !parsed.ok ||
+      !parsed.value?.rider_id ||
+      !parsed.value?.order_id ||
+      !parsed.value?.type ||
+      !parsed.value?.image_url ||
+      typeof parsed.value?.lat !== "number" ||
+      typeof parsed.value?.lng !== "number" ||
+      !parsed.value?.captured_at
+    ) {
+      return jsonResponse({ success: false, reason: "invalid_body", message: "Missing required fields" }, 400);
+    }
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+    const supabase = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+
+    const rider = await requireAuthRider(supabase, req);
+    if (String(rider.id) !== String(parsed.value.rider_id)) {
+      return jsonResponse({ success: false, reason: "unauthorized" }, 401);
+    }
+
+    const order = await withTimeout(
+      supabase
+        .from("orders")
+        .select("id,rider_id,status,dealer_lat,dealer_lng,mechanic_lat,mechanic_lng,dealer_confirmed_handoff")
+        .eq("id", parsed.value.order_id)
+        .maybeSingle<Order>(),
+      8000,
+    );
+
+    const o = (order as any) as Order | null;
+    const err = (order as any)?.error;
+    if (err) throw err;
+    if (!o) return jsonResponse({ success: false, reason: "order_not_found" }, 404);
+    if (o.rider_id !== rider.id) return jsonResponse({ success: false, reason: "order_mismatch" }, 403);
+
+    const capturedDate = new Date(parsed.value.captured_at);
+    if (Number.isNaN(capturedDate.getTime())) return jsonResponse({ success: false, reason: "invalid_captured_at" }, 400);
+    const diffMs = Math.abs(Date.now() - capturedDate.getTime());
+    if (diffMs > 3 * 60 * 1000) return jsonResponse({ success: false, reason: "captured_at_out_of_window" }, 400);
+
+    if (parsed.value.type === "pickup") {
+      if (o.status !== "rider_at_pickup") return jsonResponse({ success: false, reason: "invalid_order_state" }, 409);
+      // If your flow requires it
+      if (o.dealer_confirmed_handoff !== true) {
+        return jsonResponse({ success: false, reason: "dealer_handoff_not_confirmed" }, 409);
+      }
+      if (o.dealer_lat === null || o.dealer_lng === null) return jsonResponse({ success: false, reason: "missing_dealer_coordinates" }, 400);
+      const dist = haversineMeters(parsed.value.lat, parsed.value.lng, o.dealer_lat, o.dealer_lng);
+      if (dist > 50) return jsonResponse({ success: false, reason: "out_of_geofence" }, 200);
+
+      // Insert photo
+      const { data: photo, error: photoErr } = await withTimeout(
+        supabase
+          .from("photos")
+          .insert({
+            order_id: o.id,
+            rider_id: rider.id,
+            type: "pickup",
+            image_url: parsed.value.image_url,
+            lat: parsed.value.lat,
+            lng: parsed.value.lng,
+            captured_at: capturedDate.toISOString(),
+            validated: true,
+          })
+          .select("id")
+          .maybeSingle(),
+        8000,
+      );
+      if (photoErr) throw photoErr;
+
+      const photoId = (photo as any)?.id;
+      if (!photoId) throw new Error("photo_insert_failed");
+
+      // Update orders
+      const { error: updErr } = await withTimeout(
+        supabase
+          .from("orders")
+          .update({
+            pickup_photo_id: photoId,
+            status: "picked_up",
+          })
+          .eq("id", o.id),
+        8000,
+      );
+      if (updErr) throw updErr;
+
+      return jsonResponse({ success: true, status: "picked_up" });
+    } else {
+      // delivery
+      if (o.status !== "rider_at_delivery") return jsonResponse({ success: false, reason: "invalid_order_state" }, 409);
+      if (o.mechanic_lat === null || o.mechanic_lng === null) return jsonResponse({ success: false, reason: "missing_mechanic_coordinates" }, 400);
+      const dist = haversineMeters(parsed.value.lat, parsed.value.lng, o.mechanic_lat, o.mechanic_lng);
+      if (dist > 50) return jsonResponse({ success: false, reason: "out_of_geofence" }, 200);
+
+      const { data: photo, error: photoErr } = await withTimeout(
+        supabase
+          .from("photos")
+          .insert({
+            order_id: o.id,
+            rider_id: rider.id,
+            type: "delivery",
+            image_url: parsed.value.image_url,
+            lat: parsed.value.lat,
+            lng: parsed.value.lng,
+            captured_at: capturedDate.toISOString(),
+            validated: true,
+          })
+          .select("id")
+          .maybeSingle(),
+        8000,
+      );
+      if (photoErr) throw photoErr;
+
+      const photoId = (photo as any)?.id;
+      if (!photoId) throw new Error("photo_insert_failed");
+
+      const fourHoursLaterSql = "now() + interval '4 hours'";
+
+      const { error: updErr } = await withTimeout(
+        supabase
+          .from("orders")
+          .update({
+            delivery_photo_id: photoId,
+            status: "delivered",
+            auto_confirm_at: fourHoursLaterSql as any,
+          })
+          .eq("id", o.id),
+        8000,
+      );
+      if (updErr) throw updErr;
+
+      return jsonResponse({ success: true, status: "delivered" });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("rider-confirm-photo error:", msg);
+    return jsonResponse({ success: false, reason: "server_error", message: msg }, 500);
+  }
+});
+
+The new function is now live at:
+
+https://dnskvumoyqalsrbcyyjy.supabase.co/functions/v1/rider-confirm-photo
+
+To download and work on this function locally, use the CLI command:
+
+supabase functions download rider-confirm-photo
+
+Deployed Edge Functions (per your specs)
+Created & deployed these Edge Functions:
+
+rider-accept-order
+rider-decline-order
+rider-arriving-pickup
+rider-arriving-delivery
+rider-at-pickup
+rider-at-delivery
+rider-photo-upload-url
+rider-confirm-photo
+
+
+
+So see code of al these fucntions, how they work, their inputs, outputs, etc. etc. 
+
+and tell me. if you have enough context now.
