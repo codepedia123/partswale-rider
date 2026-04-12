@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { fetchRiderCoordinates } from "../lib/data";
 import { distanceBetweenMeters } from "../lib/location";
 
 export function useGeofenceDistance(
   target: { lat?: number | null; lng?: number | null } | null,
   enabled: boolean,
+  fallbackRiderId?: string | null,
 ) {
   const [distance, setDistance] = useState<number | null>(null);
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -23,6 +25,20 @@ export function useGeofenceDistance(
     [target?.lat, target?.lng],
   );
 
+  const refreshFromSavedLocation = useCallback(async () => {
+    if (!fallbackRiderId) {
+      setError("Location refresh nahi ho paya");
+      return;
+    }
+
+    try {
+      const savedCoords = await fetchRiderCoordinates(fallbackRiderId);
+      updateDistance(savedCoords);
+    } catch {
+      setError("Location refresh nahi ho paya");
+    }
+  }, [fallbackRiderId, updateDistance]);
+
   const refresh = useCallback(async () => {
     if (target?.lat == null || target.lng == null) {
       setError("Target location missing hai");
@@ -30,7 +46,7 @@ export function useGeofenceDistance(
     }
 
     if (!("geolocation" in navigator)) {
-      setError("Location access do Settings mein");
+      await refreshFromSavedLocation();
       return;
     }
 
@@ -49,11 +65,11 @@ export function useGeofenceDistance(
         lng: position.coords.longitude,
       });
     } catch {
-      setError("Location refresh nahi ho paya");
+      await refreshFromSavedLocation();
     } finally {
       setRefreshing(false);
     }
-  }, [target?.lat, target?.lng, updateDistance]);
+  }, [target?.lat, target?.lng, updateDistance, refreshFromSavedLocation]);
 
   useEffect(() => {
     if (!enabled || target?.lat == null || target.lng == null) {
@@ -75,7 +91,7 @@ export function useGeofenceDistance(
         updateDistance(nextCoords);
       },
       () => {
-        setError("Location access do Settings mein");
+        void refreshFromSavedLocation();
       },
       {
         enableHighAccuracy: true,
@@ -85,7 +101,7 @@ export function useGeofenceDistance(
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
-  }, [enabled, target?.lat, target?.lng, updateDistance]);
+  }, [enabled, target?.lat, target?.lng, updateDistance, refreshFromSavedLocation]);
 
   return {
     distance,

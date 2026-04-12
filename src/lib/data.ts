@@ -121,6 +121,28 @@ export async function fetchRiderProfile(riderId: string): Promise<RiderProfile> 
   return data;
 }
 
+export async function fetchRiderCoordinates(riderId: string): Promise<Coordinates> {
+  const client = ensureSupabase();
+  const { data, error } = await client
+    .from("riders")
+    .select("lat, lng")
+    .eq("id", riderId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw error ?? new Error("Rider location not found");
+  }
+
+  const lat = Number(data.lat);
+  const lng = Number(data.lng);
+
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
+    throw new Error("Rider saved location missing");
+  }
+
+  return { lat, lng };
+}
+
 export async function findUserByPhone(phone: string) {
   const client = ensureSupabase();
   const { data, error } = await client

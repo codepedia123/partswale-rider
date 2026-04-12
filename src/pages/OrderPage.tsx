@@ -75,10 +75,15 @@ export function OrderPage() {
         ? { lat: bundle.mechanic.lat, lng: bundle.mechanic.lng }
         : null;
 
-  const pickupDistance = useGeofenceDistance(dealerTarget, order?.status === "rider_assigned");
+  const pickupDistance = useGeofenceDistance(
+    dealerTarget,
+    order?.status === "rider_assigned",
+    session?.riderId,
+  );
   const deliveryDistance = useGeofenceDistance(
     mechanicTarget,
     order?.status === "picked_up",
+    session?.riderId,
   );
 
   useEffect(() => {
