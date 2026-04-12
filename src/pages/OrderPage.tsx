@@ -406,8 +406,7 @@ export function OrderPage() {
                     }
                     onClick={() =>
                       runAction("pickup-arrive", async () => {
-                        const position = await getCurrentPosition();
-                        const coords = positionToCoordinates(position);
+                        const coords = pickupDistance.coords ?? positionToCoordinates(await getCurrentPosition());
                         await confirmAtPickup(session!, order.id, coords.lat, coords.lng);
                         pushToast("success", "Pickup arrival confirm ho gaya");
                         setBundle((current) =>
@@ -566,8 +565,7 @@ export function OrderPage() {
                     }
                     onClick={() =>
                       runAction("delivery-arrive", async () => {
-                        const position = await getCurrentPosition();
-                        const coords = positionToCoordinates(position);
+                        const coords = deliveryDistance.coords ?? positionToCoordinates(await getCurrentPosition());
                         await confirmAtDelivery(session!, order.id, coords.lat, coords.lng);
                         pushToast("success", "Delivery arrival confirm ho gaya");
                         setBundle((current) =>
