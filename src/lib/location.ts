@@ -58,7 +58,13 @@ export function openGoogleMaps(lat?: number | null, lng?: number | null) {
     return;
   }
 
-  window.open(`https://maps.google.com/?q=${lat},${lng}`, "_blank", "noopener,noreferrer");
+  const params = new URLSearchParams({
+    api: "1",
+    destination: `${lat},${lng}`,
+    travelmode: "driving",
+  });
+
+  window.open(`https://www.google.com/maps/dir/?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
 
 export function getCurrentPosition(options?: PositionOptions) {

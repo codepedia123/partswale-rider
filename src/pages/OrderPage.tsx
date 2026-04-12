@@ -385,6 +385,14 @@ export function OrderPage() {
                   </p>
                   <button
                     type="button"
+                    className="button button--secondary"
+                    disabled={step.state !== "active" || pickupDistance.refreshing}
+                    onClick={() => void pickupDistance.refresh()}
+                  >
+                    {pickupDistance.refreshing ? "Refreshing..." : "Distance Refresh Karo"}
+                  </button>
+                  <button
+                    type="button"
                     className="button button--success"
                     disabled={
                       step.state !== "active" ||
@@ -535,6 +543,14 @@ export function OrderPage() {
                     {deliveryDistance.error ??
                       `Aap mechanic se ${metersToHuman(deliveryDistance.distance)} door hain`}
                   </p>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    disabled={step.state !== "active" || deliveryDistance.refreshing}
+                    onClick={() => void deliveryDistance.refresh()}
+                  >
+                    {deliveryDistance.refreshing ? "Refreshing..." : "Distance Refresh Karo"}
+                  </button>
                   <button
                     type="button"
                     className="button button--success"
