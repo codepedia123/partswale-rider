@@ -415,7 +415,7 @@ export function DashboardPage() {
                 ) : pendingJobs.length > 0 ? (
                   <div className="stack">
                     {pendingJobs.map((job) => (
-                      <article className="list-item stack" key={job.id}>
+                      <article className="list-item request-job-card stack" key={job.id}>
                         <div className="card__header">
                           <div>
                             <p className="eyebrow">{job.district}</p>

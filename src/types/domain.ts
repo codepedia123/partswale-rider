@@ -61,7 +61,6 @@ export interface OrderRecord {
   request_id?: string | null;
   quote_id?: string | null;
   status: OrderStatus | string;
-  order_status?: string | null;
   mechanic_id?: string | null;
   dealer_id?: string | null;
   amount?: number | string | null;
