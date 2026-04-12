@@ -124,12 +124,7 @@ export function OrderPage() {
           table: "orders",
           filter: `id=eq.${orderId}`,
         },
-        (payload) => {
-          const nextOrder = payload.new as OrderRecord;
-          if (nextOrder.dealer_confirmed_handoff) {
-            pushToast("success", "Dealer confirmation mil gaya");
-          }
-
+        () => {
           void load();
         },
       )
@@ -163,7 +158,7 @@ export function OrderPage() {
     }
   }, [bundle?.quoteItems]);
 
-  const pickupReadyForPhoto = Boolean(order?.dealer_confirmed_handoff) && riderItemsConfirmed;
+  const pickupReadyForPhoto = riderItemsConfirmed;
   const orderComplete = order?.status === "delivered" || order?.status === "completed";
   const disableBack = order?.status === "rider_at_pickup" || order?.status === "rider_at_delivery";
 
@@ -195,7 +190,7 @@ export function OrderPage() {
       },
       {
         key: "handoff",
-        title: "Dealer Handoff Confirmation",
+        title: "Confirm Pickup Items",
         state:
           order?.status === "rider_at_pickup"
             ? pickupReadyForPhoto
@@ -428,16 +423,11 @@ export function OrderPage() {
               {step.key === "handoff" ? (
                 <div className="stack">
                   <p className="section-copy">
-                    Dealer ke items lein aur unka confirmation ka intezaar karein.
+                    Dealer se order ID match karein, items lein, aur item count confirm karein.
                   </p>
                   <div className="chip-row">
-                    <span className={`pill ${order.dealer_confirmed_handoff ? "pill--success" : "pill--warning"}`}>
-                      {order.dealer_confirmed_handoff
-                        ? "Dealer confirmed"
-                        : "Dealer ke confirmation ka wait kar rahe hain..."}
-                    </span>
                     <span className={`pill ${riderItemsConfirmed ? "pill--success" : ""}`}>
-                      {riderItemsConfirmed ? "Aapne item count confirm kiya" : "Rider item count pending"}
+                      {riderItemsConfirmed ? "Aapne item count confirm kiya" : "Item count pending"}
                     </span>
                   </div>
                   <ul className="list">
