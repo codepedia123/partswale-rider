@@ -124,7 +124,12 @@ export function OrderPage() {
           table: "orders",
           filter: `id=eq.${orderId}`,
         },
-        () => {
+        (payload) => {
+          const nextOrder = payload.new as OrderRecord;
+          if (nextOrder.dealer_confirmed_handoff) {
+            pushToast("success", "Dealer confirmation mil gaya");
+          }
+
           void load();
         },
       )
@@ -159,6 +164,8 @@ export function OrderPage() {
   }, [bundle?.quoteItems]);
 
   const pickupReadyForPhoto = riderItemsConfirmed;
+  const pickupPhotoSubmitted = Boolean(order?.pickup_photo_id);
+  const pickupDealerConfirmed = Boolean(order?.dealer_confirmed_handoff);
   const orderComplete = order?.status === "delivered" || order?.status === "completed";
   const disableBack = order?.status === "rider_at_pickup" || order?.status === "rider_at_delivery";
 
@@ -205,8 +212,24 @@ export function OrderPage() {
         title: "Take Pickup Photo",
         state:
           order?.status === "rider_at_pickup"
-            ? pickupReadyForPhoto
-              ? "active"
+            ? pickupPhotoSubmitted
+              ? "done"
+              : pickupReadyForPhoto
+                ? "active"
+                : "locked"
+            : order && ["picked_up", "rider_at_delivery", "delivered", "completed"].includes(order.status)
+              ? "done"
+              : "locked",
+      },
+      {
+        key: "dealer-confirmation",
+        title: "Dealer Confirmation",
+        state:
+          order?.status === "rider_at_pickup"
+            ? pickupPhotoSubmitted
+              ? pickupDealerConfirmed
+                ? "done"
+                : "active"
               : "locked"
             : order && ["picked_up", "rider_at_delivery", "delivered", "completed"].includes(order.status)
               ? "done"
@@ -252,7 +275,15 @@ export function OrderPage() {
         state: orderComplete ? "active" : "locked",
       },
     ];
-  }, [deliveryAnnounced, order, orderComplete, pickupAnnounced, pickupReadyForPhoto]);
+  }, [
+    deliveryAnnounced,
+    order,
+    orderComplete,
+    pickupAnnounced,
+    pickupDealerConfirmed,
+    pickupPhotoSubmitted,
+    pickupReadyForPhoto,
+  ]);
 
   async function runAction(actionKey: string, handler: () => Promise<void>) {
     if (!session) {
@@ -487,6 +518,21 @@ export function OrderPage() {
                   >
                     Camera Kholo
                   </button>
+                </div>
+              ) : null}
+
+              {step.key === "dealer-confirmation" ? (
+                <div className="stack">
+                  <p className="section-copy">
+                    Pickup photo submit ho gayi. Ab dealer order ID verify karke confirmation karega.
+                  </p>
+                  <div className="chip-row">
+                    <span className={`pill ${pickupDealerConfirmed ? "pill--success" : "pill--warning"}`}>
+                      {pickupDealerConfirmed
+                        ? "Dealer confirmed"
+                        : "Dealer ke confirmation ka wait kar rahe hain..."}
+                    </span>
+                  </div>
                 </div>
               ) : null}
 
