@@ -8,7 +8,6 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { FullscreenLoader } from "../components/shared/FullscreenLoader";
 import { PageHeader } from "../components/shared/PageHeader";
-import { getCurrentPosition, positionToCoordinates } from "../lib/location";
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
 import { shortOrderId } from "../lib/format";
 
@@ -23,15 +22,11 @@ interface PreviewState {
 }
 
 async function getPhotoCoordinates(riderId?: string) {
-  if (riderId) {
-    try {
-      return await fetchRiderCoordinates(riderId);
-    } catch {
-      // Fall back to browser GPS if the rider row has no current coordinates yet.
-    }
+  if (!riderId) {
+    throw new Error("Rider session missing");
   }
 
-  return positionToCoordinates(await getCurrentPosition());
+  return fetchRiderCoordinates(riderId);
 }
 
 export function CapturePage() {

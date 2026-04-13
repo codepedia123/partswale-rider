@@ -9,9 +9,14 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useNow } from "../hooks/useNow";
-import { fetchPendingRiderJobs } from "../lib/data";
+import {
+  fetchPendingRiderJobs,
+  fetchRiderLocation,
+  getNextRiderLocationRefreshDelay,
+  type RiderLocation,
+} from "../lib/data";
 import { formatCurrency, formatDurationHours, formatISTTime, quoteItemsSummary } from "../lib/format";
-import { getCurrentPosition, getGoogleMapsRouteUrl, positionToCoordinates } from "../lib/location";
+import { getGoogleMapsRouteUrl } from "../lib/location";
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { ToggleSwitch } from "../components/shared/ToggleSwitch";
@@ -32,6 +37,7 @@ export function DashboardPage() {
   const [loadingPendingJobs, setLoadingPendingJobs] = useState(false);
   const [pendingJobsLoaded, setPendingJobsLoaded] = useState(false);
   const [takingJobId, setTakingJobId] = useState<string | null>(null);
+  const [riderLocation, setRiderLocation] = useState<RiderLocation | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -101,6 +107,45 @@ export function DashboardPage() {
     setActiveOrderId,
     setIncomingRequestCount,
   ]);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    let mounted = true;
+    let timeoutId: number | null = null;
+
+    const loadRiderLocation = async () => {
+      try {
+        const nextLocation = await fetchRiderLocation(session.riderId);
+
+        if (!mounted) {
+          return;
+        }
+
+        setRiderLocation(nextLocation);
+        const nextDelay = getNextRiderLocationRefreshDelay(nextLocation.locationUpdatedAt);
+        timeoutId = window.setTimeout(
+          loadRiderLocation,
+          nextDelay <= 0 ? 5 * 60 * 1000 : nextDelay,
+        );
+      } catch {
+        if (mounted) {
+          timeoutId = window.setTimeout(loadRiderLocation, 5 * 60 * 1000);
+        }
+      }
+    };
+
+    void loadRiderLocation();
+
+    return () => {
+      mounted = false;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [session]);
 
   const incomingRequest = dashboard?.incomingRequests[0] ?? null;
   const greeting = useMemo(() => `Namaste, ${session?.riderName ?? "Rider"} 👋`, [session?.riderName]);
@@ -187,16 +232,10 @@ export function DashboardPage() {
     try {
       setLoadingPendingJobs(true);
       setPendingJobsLoaded(true);
-      let liveLocation;
+      const location = riderLocation ?? await fetchRiderLocation(session.riderId);
+      setRiderLocation(location);
 
-      try {
-        const position = await getCurrentPosition();
-        liveLocation = positionToCoordinates(position);
-      } catch {
-        pushToast("info", "Live location nahi mila, saved rider location se filter kar rahe hain.");
-      }
-
-      const jobs = await fetchPendingRiderJobs(session.riderId, liveLocation);
+      const jobs = await fetchPendingRiderJobs(session.riderId, location);
       setPendingJobs(jobs);
 
       if (jobs.length === 0) {

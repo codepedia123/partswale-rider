@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { fetchRiderCoordinates } from "../lib/data";
+import { fetchRiderLocation, getNextRiderLocationRefreshDelay } from "../lib/data";
 import { distanceBetweenMeters } from "../lib/location";
 
 export function useGeofenceDistance(
@@ -28,14 +28,16 @@ export function useGeofenceDistance(
   const refreshFromSavedLocation = useCallback(async () => {
     if (!fallbackRiderId) {
       setError("Location refresh nahi ho paya");
-      return;
+      return null;
     }
 
     try {
-      const savedCoords = await fetchRiderCoordinates(fallbackRiderId);
-      updateDistance(savedCoords);
+      const savedLocation = await fetchRiderLocation(fallbackRiderId);
+      updateDistance(savedLocation);
+      return savedLocation;
     } catch {
       setError("Location refresh nahi ho paya");
+      return null;
     }
   }, [fallbackRiderId, updateDistance]);
 
@@ -45,26 +47,8 @@ export function useGeofenceDistance(
       return;
     }
 
-    if (!("geolocation" in navigator)) {
-      await refreshFromSavedLocation();
-      return;
-    }
-
     try {
       setRefreshing(true);
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        });
-      });
-
-      updateDistance({
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-      });
-    } catch {
       await refreshFromSavedLocation();
     } finally {
       setRefreshing(false);
@@ -76,31 +60,27 @@ export function useGeofenceDistance(
       return;
     }
 
-    if (!("geolocation" in navigator)) {
-      setError("Location access do Settings mein");
-      return;
-    }
+    let timeoutId: number | null = null;
+    let cancelled = false;
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        const nextCoords = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        };
+    const loadAndSchedule = async () => {
+      const savedLocation = await refreshFromSavedLocation();
+      if (cancelled || !savedLocation) {
+        return;
+      }
 
-        updateDistance(nextCoords);
-      },
-      () => {
-        void refreshFromSavedLocation();
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 5000,
-      },
-    );
+      const nextDelay = getNextRiderLocationRefreshDelay(savedLocation.locationUpdatedAt);
+      timeoutId = window.setTimeout(loadAndSchedule, nextDelay <= 0 ? 5 * 60 * 1000 : nextDelay);
+    };
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    void loadAndSchedule();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
   }, [enabled, target?.lat, target?.lng, updateDistance, refreshFromSavedLocation]);
 
   return {

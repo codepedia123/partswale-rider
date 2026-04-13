@@ -13,6 +13,12 @@ import { parseQuoteItems } from "./format";
 import { distanceBetweenKm, roundKm, type Coordinates } from "./location";
 import { supabase } from "./supabase";
 
+const RIDER_LOCATION_REFRESH_MS = 5 * 60 * 1000;
+
+export interface RiderLocation extends Coordinates {
+  locationUpdatedAt: string | null;
+}
+
 function ensureSupabase() {
   if (!supabase) {
     throw new Error("Supabase is not configured");
@@ -122,10 +128,15 @@ export async function fetchRiderProfile(riderId: string): Promise<RiderProfile> 
 }
 
 export async function fetchRiderCoordinates(riderId: string): Promise<Coordinates> {
+  const location = await fetchRiderLocation(riderId);
+  return { lat: location.lat, lng: location.lng };
+}
+
+export async function fetchRiderLocation(riderId: string): Promise<RiderLocation> {
   const client = ensureSupabase();
   const { data, error } = await client
     .from("riders")
-    .select("lat, lng")
+    .select("lat, lng, location_updated_at")
     .eq("id", riderId)
     .maybeSingle();
 
@@ -140,7 +151,25 @@ export async function fetchRiderCoordinates(riderId: string): Promise<Coordinate
     throw new Error("Rider saved location missing");
   }
 
-  return { lat, lng };
+  return {
+    lat,
+    lng,
+    locationUpdatedAt: data.location_updated_at ?? null,
+  };
+}
+
+export function getNextRiderLocationRefreshDelay(locationUpdatedAt?: string | null) {
+  if (!locationUpdatedAt) {
+    return RIDER_LOCATION_REFRESH_MS;
+  }
+
+  const updatedAtMs = new Date(locationUpdatedAt).getTime();
+  if (Number.isNaN(updatedAtMs)) {
+    return RIDER_LOCATION_REFRESH_MS;
+  }
+
+  const elapsedMs = Date.now() - updatedAtMs;
+  return Math.max(0, RIDER_LOCATION_REFRESH_MS - elapsedMs);
 }
 
 export async function findUserByPhone(phone: string) {

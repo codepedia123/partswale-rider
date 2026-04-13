@@ -66,26 +66,3 @@ export function openGoogleMaps(lat?: number | null, lng?: number | null) {
 
   window.open(`https://www.google.com/maps/dir/?${params.toString()}`, "_blank", "noopener,noreferrer");
 }
-
-export function getCurrentPosition(options?: PositionOptions) {
-  return new Promise<GeolocationPosition>((resolve, reject) => {
-    if (!("geolocation" in navigator)) {
-      reject(new Error("Location access not available"));
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 5000,
-      ...options,
-    });
-  });
-}
-
-export function positionToCoordinates(position: GeolocationPosition): Coordinates {
-  return {
-    lat: position.coords.latitude,
-    lng: position.coords.longitude,
-  };
-}

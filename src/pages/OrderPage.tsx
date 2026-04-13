@@ -7,7 +7,7 @@ import {
   notifyArrivingPickup,
   raiseIssue,
 } from "../lib/api";
-import { fetchOrderBundle } from "../lib/data";
+import { fetchOrderBundle, fetchRiderCoordinates } from "../lib/data";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useGeofenceDistance } from "../hooks/useGeofenceDistance";
@@ -19,7 +19,7 @@ import {
   shortOrderId,
 } from "../lib/format";
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
-import { getCurrentPosition, openGoogleMaps, positionToCoordinates } from "../lib/location";
+import { openGoogleMaps } from "../lib/location";
 import { supabase } from "../lib/supabase";
 import { EmptyState } from "../components/shared/EmptyState";
 import { PageHeader } from "../components/shared/PageHeader";
@@ -432,7 +432,7 @@ export function OrderPage() {
                     }
                     onClick={() =>
                       runAction("pickup-arrive", async () => {
-                        const coords = pickupDistance.coords ?? positionToCoordinates(await getCurrentPosition());
+                        const coords = pickupDistance.coords ?? await fetchRiderCoordinates(session!.riderId);
                         await confirmAtPickup(session!, order.id, coords.lat, coords.lng);
                         pushToast("success", "Pickup arrival confirm ho gaya");
                         setBundle((current) =>
@@ -601,7 +601,7 @@ export function OrderPage() {
                     }
                     onClick={() =>
                       runAction("delivery-arrive", async () => {
-                        const coords = deliveryDistance.coords ?? positionToCoordinates(await getCurrentPosition());
+                        const coords = deliveryDistance.coords ?? await fetchRiderCoordinates(session!.riderId);
                         await confirmAtDelivery(session!, order.id, coords.lat, coords.lng);
                         pushToast("success", "Delivery arrival confirm ho gaya");
                         setBundle((current) =>
