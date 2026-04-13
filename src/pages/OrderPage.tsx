@@ -7,7 +7,7 @@ import {
   notifyArrivingPickup,
   raiseIssue,
 } from "../lib/api";
-import { fetchOrderBundle, fetchRiderCoordinates } from "../lib/data";
+import { completeDeliveryWithOtp, fetchOrderBundle, fetchRiderCoordinates } from "../lib/data";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useGeofenceDistance } from "../hooks/useGeofenceDistance";
@@ -59,6 +59,7 @@ export function OrderPage() {
   );
   const [checkedItems, setCheckedItems] = useState<number[]>([]);
   const [issueNote, setIssueNote] = useState("");
+  const [deliveryOtp, setDeliveryOtp] = useState("");
   const [actioning, setActioning] = useState<string | null>(null);
 
   const order = bundle?.order;
@@ -166,7 +167,8 @@ export function OrderPage() {
   const pickupReadyForPhoto = riderItemsConfirmed;
   const pickupPhotoSubmitted = Boolean(order?.pickup_photo_id);
   const pickupDealerConfirmed = Boolean(order?.dealer_confirmed_handoff);
-  const orderComplete = order?.status === "delivered" || order?.status === "completed";
+  const deliveryPhotoSubmitted = Boolean(order?.delivery_photo_id);
+  const orderComplete = order?.status === "completed";
   const disableBack = order?.status === "rider_at_pickup" || order?.status === "rider_at_delivery";
 
   const steps = useMemo(() => {
@@ -270,6 +272,18 @@ export function OrderPage() {
               : "locked",
       },
       {
+        key: "delivery-otp",
+        title: "Enter Delivery OTP",
+        state:
+          order?.status === "delivered"
+            ? deliveryPhotoSubmitted
+              ? "active"
+              : "locked"
+            : order?.status === "completed"
+              ? "done"
+              : "locked",
+      },
+      {
         key: "done",
         title: "Done",
         state: orderComplete ? "active" : "locked",
@@ -279,6 +293,7 @@ export function OrderPage() {
     deliveryAnnounced,
     order,
     orderComplete,
+    deliveryPhotoSubmitted,
     pickupAnnounced,
     pickupDealerConfirmed,
     pickupPhotoSubmitted,
@@ -632,6 +647,52 @@ export function OrderPage() {
                     onClick={() => navigate(`/capture/${order.id}/delivery`)}
                   >
                     Camera Kholo
+                  </button>
+                </div>
+              ) : null}
+
+              {step.key === "delivery-otp" ? (
+                <div className="stack">
+                  <p className="section-copy">
+                    Mechanic ko WhatsApp par OTP bheja gaya hai. Items confirm hone ke baad mechanic se OTP lo.
+                  </p>
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="Delivery OTP"
+                    value={deliveryOtp}
+                    onChange={(event) => setDeliveryOtp(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                    disabled={step.state !== "active"}
+                  />
+                  <button
+                    type="button"
+                    className="button button--success"
+                    disabled={step.state !== "active" || deliveryOtp.length !== 6 || actioning === "delivery-otp"}
+                    onClick={() =>
+                      runAction("delivery-otp", async () => {
+                        await completeDeliveryWithOtp(session!.riderId, order.id, deliveryOtp);
+                        setDeliveryOtp("");
+                        pushToast("success", "Delivery OTP match ho gaya. Order completed.");
+                        setActiveOrderId(null);
+                        setBundle((current) =>
+                          current
+                            ? {
+                                ...current,
+                                order: {
+                                  ...current.order,
+                                  status: "completed",
+                                  mechanic_confirmed_receipt: true,
+                                  delivery_confirmed_at: new Date().toISOString(),
+                                  delivered_at: new Date().toISOString(),
+                                },
+                              }
+                            : current,
+                        );
+                      })
+                    }
+                  >
+                    OTP Confirm Karo
                   </button>
                 </div>
               ) : null}

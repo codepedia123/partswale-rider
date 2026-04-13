@@ -69,6 +69,7 @@ export interface OrderRecord {
   platform_fee?: number | string | null;
   pickup_photo_id?: string | null;
   delivery_photo_id?: string | null;
+  delivery_otp?: string | null;
   pickup_confirmed_at?: string | null;
   delivery_confirmed_at?: string | null;
   dealer_confirmed_handoff?: boolean | null;

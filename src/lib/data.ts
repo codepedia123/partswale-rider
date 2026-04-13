@@ -110,6 +110,52 @@ export async function fetchOrderBundle(orderId: string): Promise<OrderBundle> {
   };
 }
 
+export async function completeDeliveryWithOtp(riderId: string, orderId: string, otp: string) {
+  const client = ensureSupabase();
+  const normalizedOtp = otp.trim();
+
+  const { data: order, error } = await client
+    .from("orders")
+    .select("id,rider_id,status,delivery_photo_id,delivery_otp")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  if (error || !order) {
+    throw error ?? new Error("Order not found");
+  }
+
+  if (order.rider_id !== riderId) {
+    throw new Error("Order does not belong to this rider");
+  }
+
+  if (order.status !== "delivered" || !order.delivery_photo_id) {
+    throw new Error("Delivery photo is not confirmed yet");
+  }
+
+  if (!order.delivery_otp || String(order.delivery_otp).trim() !== normalizedOtp) {
+    throw new Error("Delivery OTP galat hai");
+  }
+
+  const now = new Date().toISOString();
+  const { data: completedOrder, error: updateError } = await client
+    .from("orders")
+    .update({
+      status: "completed",
+      mechanic_confirmed_receipt: true,
+      delivery_confirmed_at: now,
+      delivered_at: now,
+    })
+    .eq("id", orderId)
+    .eq("rider_id", riderId)
+    .eq("status", "delivered")
+    .select("id")
+    .maybeSingle();
+
+  if (updateError || !completedOrder) {
+    throw updateError ?? new Error("Order could not be completed");
+  }
+}
+
 export async function fetchRiderProfile(riderId: string): Promise<RiderProfile> {
   const client = ensureSupabase();
   const { data, error } = await client
