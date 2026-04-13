@@ -3,11 +3,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   confirmAtDelivery,
   confirmAtPickup,
+  completeDeliveryWithOtp,
   notifyArrivingDelivery,
   notifyArrivingPickup,
   raiseIssue,
 } from "../lib/api";
-import { completeDeliveryWithOtp, fetchOrderBundle, fetchRiderCoordinates } from "../lib/data";
+import { fetchOrderBundle, fetchRiderCoordinates } from "../lib/data";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useGeofenceDistance } from "../hooks/useGeofenceDistance";
@@ -671,7 +672,7 @@ export function OrderPage() {
                     disabled={step.state !== "active" || deliveryOtp.length !== 6 || actioning === "delivery-otp"}
                     onClick={() =>
                       runAction("delivery-otp", async () => {
-                        await completeDeliveryWithOtp(session!.riderId, order.id, deliveryOtp);
+                        await completeDeliveryWithOtp(session!, order.id, deliveryOtp);
                         setDeliveryOtp("");
                         pushToast("success", "Delivery OTP match ho gaya. Order completed.");
                         setActiveOrderId(null);

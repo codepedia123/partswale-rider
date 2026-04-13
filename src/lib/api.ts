@@ -319,6 +319,13 @@ export function confirmPhoto(
   }, { token: session.token });
 }
 
+export function completeDeliveryWithOtp(session: RiderSession, orderId: string, otp: string) {
+  return edgeRequest<{ order_id?: string; status?: string }>("rider-complete-delivery", {
+    method: "POST",
+    body: JSON.stringify({ rider_id: session.riderId, order_id: orderId, otp }),
+  }, { token: session.token });
+}
+
 export function raiseIssue(
   session: RiderSession,
   payload: { order_id: string; issue_type: string; note?: string },
