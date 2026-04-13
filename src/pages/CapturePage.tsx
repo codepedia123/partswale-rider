@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { confirmPhoto } from "../lib/api";
 import { captureVideoFrame, compressImageBlob } from "../lib/camera";
+import { fetchRiderCoordinates } from "../lib/data";
 import { createCaptureTimestamp, uploadOrderPhoto } from "../lib/photoUpload";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
@@ -19,6 +20,18 @@ interface PreviewState {
   capturedAt: string;
   lat: number;
   lng: number;
+}
+
+async function getPhotoCoordinates(riderId?: string) {
+  if (riderId) {
+    try {
+      return await fetchRiderCoordinates(riderId);
+    } catch {
+      // Fall back to browser GPS if the rider row has no current coordinates yet.
+    }
+  }
+
+  return positionToCoordinates(await getCurrentPosition());
 }
 
 export function CapturePage() {
@@ -104,8 +117,7 @@ export function CapturePage() {
       setLocating(true);
       const rawBlob = await captureVideoFrame(videoRef.current);
       const compressedBlob = await compressImageBlob(rawBlob);
-      const position = await getCurrentPosition();
-      const coords = positionToCoordinates(position);
+      const coords = await getPhotoCoordinates(session?.riderId);
       const objectUrl = URL.createObjectURL(compressedBlob);
 
       setPreview({
