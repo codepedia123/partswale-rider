@@ -425,9 +425,17 @@ type Order = {
   status: string;
   dealer_id: string;
   mechanic_id: string;
+  quote_id: string | null;
+  amount: number | string | null;
+  distance: number | string | null;
+  dealer_lat: number | string | null;
+  dealer_lng: number | string | null;
+  mechanic_lat: number | string | null;
+  mechanic_lng: number | string | null;
 };
 
 type UserPhone = { phone: string | null };
+type QuoteRow = { quote_details: unknown };
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -471,6 +479,61 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
       Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+}
+
+function toNumber(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function parseQuoteDetails(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function firstNumber(row: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = Number(row[key]);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function calculateMrpTotal(items: unknown[], fallbackAmount: number) {
+  const total = items.reduce((sum, item) => {
+    if (!item || typeof item !== "object") return sum;
+    const row = item as Record<string, unknown>;
+    const qty = firstNumber(row, ["quantity", "qty"]) ?? 1;
+    const mrp =
+      firstNumber(row, ["mrp", "MRP", "mrp_price", "mrpPrice", "original_price", "originalPrice"]) ??
+      firstNumber(row, ["price", "rate", "unit_price", "unitPrice"]);
+    return mrp === null ? sum : sum + mrp * qty;
+  }, 0);
+
+  return total > 0 ? total : fallbackAmount;
+}
+
+function calculateDeliveryFee(order: Order) {
+  const distanceKm = Number(order.distance);
+  if (Number.isFinite(distanceKm) && distanceKm > 0) return roundMoney(distanceKm * 3);
+
+  const dealerLat = Number(order.dealer_lat);
+  const dealerLng = Number(order.dealer_lng);
+  const mechanicLat = Number(order.mechanic_lat);
+  const mechanicLng = Number(order.mechanic_lng);
+
+  if (![dealerLat, dealerLng, mechanicLat, mechanicLng].every(Number.isFinite)) return 0;
+  return roundMoney((haversineMeters(dealerLat, dealerLng, mechanicLat, mechanicLng) / 1000) * 3);
 }
 
 async function sendWhatsAppText(phone: string, text: string) {
@@ -562,9 +625,9 @@ serve(async (req) => {
     const { data: order, error: orderErr } = await withTimeout(
       supabase
         .from("orders")
-        .select("id,rider_id,status,dealer_id,mechanic_id")
+        .select("id,rider_id,status,dealer_id,mechanic_id,quote_id,amount,distance,dealer_lat,dealer_lng,mechanic_lat,mechanic_lng")
         .eq("id", order_id)
-        .maybeSingle(),
+        .maybeSingle<Order>(),
       8000,
     );
     if (orderErr) throw orderErr;
@@ -590,12 +653,31 @@ serve(async (req) => {
       return jsonResponse({ success: false, reason: "order_taken" }, 409);
     }
 
+    const amount = toNumber(order.amount);
+    let quoteItems: unknown[] = [];
+    if (order.quote_id) {
+      const { data: quote, error: quoteErr } = await withTimeout(
+        supabase
+          .from("quotes")
+          .select("quote_details")
+          .eq("id", order.quote_id)
+          .maybeSingle<QuoteRow>(),
+        8000,
+      );
+      if (quoteErr) throw quoteErr;
+      quoteItems = parseQuoteDetails(quote?.quote_details);
+    }
+
+    const delivery_fee = calculateDeliveryFee(order);
+    const platform_fee = roundMoney(calculateMrpTotal(quoteItems, amount) * 0.05);
+    const total_amount = roundMoney(amount + delivery_fee + platform_fee);
+
     // One safe transactional flow:
     // Atomically assign only if still unassigned + pending_rider.
     const { data: updatedRows, error: updErr } = await withTimeout(
       supabase
         .from("orders")
-        .update({ rider_id, status: "rider_assigned" })
+        .update({ rider_id, status: "rider_assigned", delivery_fee, platform_fee, total_amount })
         .eq("id", order_id)
         .is("rider_id", null)
         .eq("status", "pending_rider")

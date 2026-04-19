@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.3";
-
+//test
 type JsonBody = { rider_id: string; order_id: string; otp: string };
 type ApiOk = { success: true; order_id: string; status: "completed" };
 type ApiFail = { success: false; reason: string; message?: string; auth?: false };
