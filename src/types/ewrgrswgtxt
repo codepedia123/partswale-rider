@@ -425,7 +425,7 @@ type Order = {
   status: string;
   dealer_id: string;
   mechanic_id: string;
-  quote_id: string | null;
+U  quote_id: string | null;
   amount: number | string | null;
   distance: number | string | null;
   dealer_lat: number | string | null;
