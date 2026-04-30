@@ -109,6 +109,11 @@ function formatMoney(value: unknown) {
   return `₹${Math.round((Number.isFinite(amount) ? amount : 0) * 100) / 100}`;
 }
 
+function payoutAmount(value: unknown) {
+  const amount = Number(value ?? 0);
+  return Math.round((Number.isFinite(amount) ? amount : 0) * 100) / 100;
+}
+
 function appendMessageConversation(row: UserRow | Rider, messageContent: string, role: "user" | "rider") {
   const conv = parseConversation(row.conversation);
   const existingVariables = conv.variables && typeof conv.variables === "object" ? conv.variables : {};
@@ -337,6 +342,37 @@ serve(async (req) => {
     );
     if (updateErr) throw updateErr;
     if (!completedOrder) return jsonResponse({ success: false, reason: "order_already_updated" }, 409);
+
+    const { error: payoutErr } = await withTimeout(
+      supabase.from("payouts").insert([
+        {
+          order_id: order.id,
+          recipient_type: "rider",
+          recipient_id: rider.id,
+          upi_id: null,
+          amount: payoutAmount(order.delivery_fee),
+          status: "pending",
+        },
+        {
+          order_id: order.id,
+          recipient_type: "dealer",
+          recipient_id: order.dealer_id,
+          upi_id: null,
+          amount: payoutAmount(order.amount ?? order.total_amount),
+          status: "pending",
+        },
+        {
+          order_id: order.id,
+          recipient_type: "mechanic",
+          recipient_id: order.mechanic_id,
+          upi_id: null,
+          amount: payoutAmount(order.platform_fee),
+          status: "pending",
+        },
+      ]),
+      8000,
+    );
+    if (payoutErr) throw payoutErr;
 
     const { data: dealer } = await withTimeout(
       supabase
