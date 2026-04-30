@@ -148,6 +148,7 @@ export function DashboardPage() {
   }, [session]);
 
   const incomingRequest = dashboard?.incomingRequests[0] ?? null;
+  const hasActiveOrder = Boolean(dashboard?.activeOrder);
   const greeting = useMemo(() => `Namaste, ${session?.riderName ?? "Rider"} 👋`, [session?.riderName]);
 
   async function handleToggle(nextValue: boolean) {
@@ -226,6 +227,13 @@ export function DashboardPage() {
 
   async function refreshPendingJobs() {
     if (!session) {
+      return;
+    }
+
+    if (hasActiveOrder) {
+      setPendingJobs([]);
+      setPendingJobsLoaded(false);
+      pushToast("info", "Active job complete hone tak naye requests nahi dikhaye jayenge.");
       return;
     }
 
@@ -357,7 +365,7 @@ export function DashboardPage() {
                 </div>
               ) : null}
 
-              {incomingRequest ? (
+              {!hasActiveOrder && incomingRequest ? (
                 <div className="card card--pulse stack">
                   <div className="card__header">
                     <div>
@@ -419,7 +427,7 @@ export function DashboardPage() {
                     Decline Karo
                   </button>
                 </div>
-              ) : !dashboard?.activeOrder ? (
+              ) : !hasActiveOrder ? (
                 <EmptyState
                   icon="🛵"
                   title="Koi active order nahi hai"
@@ -427,97 +435,99 @@ export function DashboardPage() {
                 />
               ) : null}
 
-              <div className="card stack">
-                <div className="card__header">
-                  <div>
-                    <p className="eyebrow">requests</p>
-                    <h2 className="section-title">Nearby pending rider jobs</h2>
+              {!hasActiveOrder ? (
+                <div className="card stack">
+                  <div className="card__header">
+                    <div>
+                      <p className="eyebrow">requests</p>
+                      <h2 className="section-title">Nearby pending rider jobs</h2>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      onClick={refreshPendingJobs}
+                      disabled={loadingPendingJobs}
+                    >
+                      {loadingPendingJobs ? "Refreshing..." : "Refresh Requests"}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="button button--secondary"
-                    onClick={refreshPendingJobs}
-                    disabled={loadingPendingJobs}
-                  >
-                    {loadingPendingJobs ? "Refreshing..." : "Refresh Requests"}
-                  </button>
+                  <p className="section-copy">
+                    Matching orders: status pending_rider, same district, and dealer pickup within 20 km of your current rider location.
+                  </p>
+
+                  {loadingPendingJobs ? (
+                    <div className="stack">
+                      <div className="skeleton" />
+                      <div className="skeleton" />
+                    </div>
+                  ) : pendingJobs.length > 0 ? (
+                    <div className="stack">
+                      {pendingJobs.map((job) => (
+                        <article className="list-item request-job-card stack" key={job.id}>
+                          <div className="card__header">
+                            <div>
+                              <p className="eyebrow">{job.district}</p>
+                              <h3 className="section-title" style={{ fontSize: "1rem" }}>
+                                {job.routeDistanceKm.toFixed(1)} km route
+                              </h3>
+                            </div>
+                            <span className="pill pill--success">{formatCurrency(job.earnings)}</span>
+                          </div>
+
+                          <div className="detail-list">
+                            <div className="detail-row">
+                              <dt>Pickup address</dt>
+                              <dd>{job.pickAddress}</dd>
+                            </div>
+                            <div className="detail-row">
+                              <dt>Drop address</dt>
+                              <dd>{job.dropAddress}</dd>
+                            </div>
+                            <div className="detail-row">
+                              <dt>Rider to dealer</dt>
+                              <dd>{job.riderToDealerDistanceKm.toFixed(1)} km away</dd>
+                            </div>
+                            <div className="detail-row">
+                              <dt>Earnings</dt>
+                              <dd>Rs 3.0 x {job.routeDistanceKm.toFixed(1)} km = {formatCurrency(job.earnings)}</dd>
+                            </div>
+                          </div>
+
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              className="button button--success"
+                              onClick={() => takePendingJob(job)}
+                              disabled={takingJobId === job.id}
+                            >
+                              {takingJobId === job.id ? "Taking..." : "Take Job"}
+                            </button>
+                            <button
+                              type="button"
+                              className="button button--secondary"
+                              onClick={() => viewPendingJobOnMap(job)}
+                            >
+                              View on Map
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : pendingJobsLoaded ? (
+                    <EmptyState
+                      icon="📍"
+                      title="Matching request nahi mila"
+                      copy="Same district aur 20 km dealer radius mein pending_rider order nahi hai."
+                    />
+                  ) : (
+                    <EmptyState
+                      icon="🔄"
+                      title="Requests refresh karein"
+                      copy="Nearby pending_rider orders DB se fetch karne ke liye Refresh Requests dabayein."
+                    />
+                  )}
                 </div>
-                <p className="section-copy">
-                  Matching orders: status pending_rider, same district, and dealer pickup within 20 km of your current rider location.
-                </p>
-
-                {loadingPendingJobs ? (
-                  <div className="stack">
-                    <div className="skeleton" />
-                    <div className="skeleton" />
-                  </div>
-                ) : pendingJobs.length > 0 ? (
-                  <div className="stack">
-                    {pendingJobs.map((job) => (
-                      <article className="list-item request-job-card stack" key={job.id}>
-                        <div className="card__header">
-                          <div>
-                            <p className="eyebrow">{job.district}</p>
-                            <h3 className="section-title" style={{ fontSize: "1rem" }}>
-                              {job.routeDistanceKm.toFixed(1)} km route
-                            </h3>
-                          </div>
-                          <span className="pill pill--success">{formatCurrency(job.earnings)}</span>
-                        </div>
-
-                        <div className="detail-list">
-                          <div className="detail-row">
-                            <dt>Pickup address</dt>
-                            <dd>{job.pickAddress}</dd>
-                          </div>
-                          <div className="detail-row">
-                            <dt>Drop address</dt>
-                            <dd>{job.dropAddress}</dd>
-                          </div>
-                          <div className="detail-row">
-                            <dt>Rider to dealer</dt>
-                            <dd>{job.riderToDealerDistanceKm.toFixed(1)} km away</dd>
-                          </div>
-                          <div className="detail-row">
-                            <dt>Earnings</dt>
-                            <dd>Rs 3.0 x {job.routeDistanceKm.toFixed(1)} km = {formatCurrency(job.earnings)}</dd>
-                          </div>
-                        </div>
-
-                        <div className="button-row">
-                          <button
-                            type="button"
-                            className="button button--success"
-                            onClick={() => takePendingJob(job)}
-                            disabled={takingJobId === job.id}
-                          >
-                            {takingJobId === job.id ? "Taking..." : "Take Job"}
-                          </button>
-                          <button
-                            type="button"
-                            className="button button--secondary"
-                            onClick={() => viewPendingJobOnMap(job)}
-                          >
-                            View on Map
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : pendingJobsLoaded ? (
-                  <EmptyState
-                    icon="📍"
-                    title="Matching request nahi mila"
-                    copy="Same district aur 20 km dealer radius mein pending_rider order nahi hai."
-                  />
-                ) : (
-                  <EmptyState
-                    icon="🔄"
-                    title="Requests refresh karein"
-                    copy="Nearby pending_rider orders DB se fetch karne ke liye Refresh Requests dabayein."
-                  />
-                )}
-              </div>
+              ) : null}
 
               <div className="card stack">
                 <div className="card__header">
