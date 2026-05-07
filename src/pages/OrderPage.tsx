@@ -6,7 +6,6 @@ import {
   completeDeliveryWithOtp,
   notifyArrivingDelivery,
   notifyArrivingPickup,
-  raiseIssue,
 } from "../lib/api";
 import { fetchOrderBundle, fetchRiderCoordinates } from "../lib/data";
 import { useAuth } from "../contexts/AuthContext";
@@ -22,6 +21,7 @@ import {
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
 import { openGoogleMaps } from "../lib/location";
 import { supabase } from "../lib/supabase";
+import { getOperatorPhoneNumber, sendOrderSupportAlert } from "../lib/whatsapp";
 import { EmptyState } from "../components/shared/EmptyState";
 import { PageHeader } from "../components/shared/PageHeader";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -60,6 +60,7 @@ export function OrderPage() {
   );
   const [checkedItems, setCheckedItems] = useState<number[]>([]);
   const [issueNote, setIssueNote] = useState("");
+  const [issueSubmitted, setIssueSubmitted] = useState(false);
   const [deliveryOtp, setDeliveryOtp] = useState("");
   const [actioning, setActioning] = useState<string | null>(null);
 
@@ -733,38 +734,34 @@ export function OrderPage() {
           <div className="button-row">
             <button
               type="button"
-              className="button button--secondary"
+              className="button button--primary"
               onClick={() =>
-                runAction("issue-order", async () => {
-                  await raiseIssue(session!, {
-                    order_id: order.id,
-                    issue_type: "order_issue",
-                    note: issueNote,
+                runAction("issue-submit", async () => {
+                  await sendOrderSupportAlert({
+                    riderName: session?.riderName ?? "Unknown Rider",
+                    riderPhone: bundle?.order?.rider_id ? undefined : undefined,
+                    orderId: order.id,
+                    note: issueNote.trim(),
                   });
-                  setIssueNote("");
-                  pushToast("success", "Order issue raise kar diya");
+                  setIssueSubmitted(true);
+                  pushToast("success", "Issue operator ko bhej diya");
                 })
               }
+              disabled={!issueNote.trim() || actioning === "issue-submit"}
             >
-              Order se Related Issue
+              Submit
             </button>
-            <button
-              type="button"
-              className="button button--secondary"
-              onClick={() =>
-                runAction("issue-location", async () => {
-                  await raiseIssue(session!, {
-                    order_id: order.id,
-                    issue_type: "location_issue",
-                    note: issueNote,
-                  });
-                  setIssueNote("");
-                  pushToast("success", "Location issue raise kar diya");
-                })
-              }
-            >
-              Location Problem
-            </button>
+            {issueSubmitted ? (
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => {
+                  window.location.href = `tel:${getOperatorPhoneNumber()}`;
+                }}
+              >
+                Call Admin
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

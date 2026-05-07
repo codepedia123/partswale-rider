@@ -10,6 +10,8 @@ export function generateOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
+const OPERATOR_PHONE = "917209463686";
+
 async function getWhatsAppPhoneNumberId() {
   if (cachedPhoneNumberId) {
     return cachedPhoneNumberId;
@@ -63,4 +65,50 @@ export async function sendWhatsAppOtp(phone: string, otp: string) {
   }
 
   return payload;
+}
+
+export async function sendOrderSupportAlert(params: {
+  riderName: string;
+  riderPhone?: string | null;
+  orderId: string;
+  note: string;
+}) {
+  const phoneNumberId = await getWhatsAppPhoneNumberId();
+  const response = await fetch(
+    `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to: OPERATOR_PHONE,
+        type: "text",
+        text: {
+          body:
+            `Rider support alert\n\n` +
+            `Rider: ${params.riderName}\n` +
+            `Phone: ${params.riderPhone ?? "N/A"}\n` +
+            `Order ID: ${params.orderId}\n\n` +
+            `Issue:\n${params.note}`,
+        },
+      }),
+    },
+  );
+
+  const payload = (await response.json().catch(() => null)) as
+    | { error?: { message?: string } }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message ?? "WhatsApp support alert send failed");
+  }
+
+  return payload;
+}
+
+export function getOperatorPhoneNumber() {
+  return OPERATOR_PHONE;
 }
