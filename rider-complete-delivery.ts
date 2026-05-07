@@ -158,8 +158,21 @@ function appendMessageConversation(row: UserRow | Rider, messageContent: string,
 
 async function sendWhatsAppText(phone: string, text: string) {
   const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+  if (!accessToken) throw new Error("missing_whatsapp_env");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+  const runtimeClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const { data: runtimeConfig, error: runtimeErr } = await runtimeClient
+    .from("whatsapp_runtime_config_v2")
+    .select("current_whatsapp_number")
+    .eq("id", 1)
+    .maybeSingle();
+  if (runtimeErr || !runtimeConfig?.current_whatsapp_number) {
+    throw runtimeErr ?? new Error("whatsapp_runtime_config_missing");
+  }
+  const phoneNumberId = String(runtimeConfig.current_whatsapp_number);
 
   const res = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
     method: "POST",
@@ -180,8 +193,21 @@ async function sendWhatsAppText(phone: string, text: string) {
 
 async function sendWhatsAppReviewList(phone: string, dealerId: string, dealerName: string, orderId: string) {
   const accessToken = Deno.env.get("WHATSAPP_ACCESS_TOKEN");
-  const phoneNumberId = Deno.env.get("WHATSAPP_PHONE_NUMBER_ID");
-  if (!accessToken || !phoneNumberId) throw new Error("missing_whatsapp_env");
+  if (!accessToken) throw new Error("missing_whatsapp_env");
+  const supabaseUrl = Deno.env.get("SUPABASE_URL");
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (!supabaseUrl || !serviceRoleKey) throw new Error("missing_supabase_env");
+
+  const runtimeClient = createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false } });
+  const { data: runtimeConfig, error: runtimeErr } = await runtimeClient
+    .from("whatsapp_runtime_config_v2")
+    .select("current_whatsapp_number")
+    .eq("id", 1)
+    .maybeSingle();
+  if (runtimeErr || !runtimeConfig?.current_whatsapp_number) {
+    throw runtimeErr ?? new Error("whatsapp_runtime_config_missing");
+  }
+  const phoneNumberId = String(runtimeConfig.current_whatsapp_number);
 
   const res = await fetch(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
     method: "POST",
