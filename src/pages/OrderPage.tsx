@@ -172,6 +172,23 @@ export function OrderPage() {
   const deliveryPhotoSubmitted = Boolean(order?.delivery_photo_id);
   const orderComplete = order?.status === "completed";
   const disableBack = order?.status === "rider_at_pickup" || order?.status === "rider_at_delivery";
+  const pickupFlowStarted = pickupAnnounced || order?.status === "rider_at_pickup";
+  const deliveryFlowStarted =
+    order != null &&
+    ["picked_up", "rider_at_delivery", "delivered", "completed"].includes(order.status);
+  const currentContact = deliveryFlowStarted
+    ? {
+        label: "Mechanic Contact",
+        name: bundle?.mechanic?.shop_name ?? bundle?.mechanic?.name ?? "Mechanic",
+        phone: bundle?.mechanic?.phone ?? null,
+      }
+    : pickupFlowStarted
+      ? {
+          label: "Dealer Contact",
+          name: bundle?.dealer?.shop_name ?? bundle?.dealer?.name ?? "Dealer",
+          phone: bundle?.dealer?.phone ?? null,
+        }
+      : null;
 
   const steps = useMemo(() => {
     return [
@@ -355,6 +372,29 @@ export function OrderPage() {
       />
 
       <div className="stack">
+        {currentContact?.phone ? (
+          <div className="card card--solid stack">
+            <div className="card__header">
+              <div>
+                <p className="eyebrow">{currentContact.label}</p>
+                <h2 className="section-title" style={{ fontSize: "1rem" }}>
+                  {currentContact.name}
+                </h2>
+              </div>
+              <button
+                type="button"
+                className="button button--success"
+                onClick={() => {
+                  window.location.href = `tel:${currentContact.phone}`;
+                }}
+              >
+                Call
+              </button>
+            </div>
+            <p className="section-copy">{currentContact.phone}</p>
+          </div>
+        ) : null}
+
         <div className="card card--solid stack">
           <div className="row row--top">
             <div>
