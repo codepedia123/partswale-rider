@@ -326,6 +326,17 @@ export function completeDeliveryWithOtp(session: RiderSession, orderId: string, 
   }, { token: session.token });
 }
 
+export function createOrderPayouts(session: RiderSession, orderId: string) {
+  return edgeRequest<{
+    order_id?: string;
+    created?: Array<{ recipient_type: string; recipient_id: string; amount: number }>;
+    skipped?: Array<{ recipient_type: string; recipient_id: string; amount?: number }>;
+  }>("create-order-payouts", {
+    method: "POST",
+    body: JSON.stringify({ order_id: orderId }),
+  }, { token: session.token });
+}
+
 export function raiseIssue(
   session: RiderSession,
   payload: { order_id: string; issue_type: string; note?: string },

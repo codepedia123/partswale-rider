@@ -4,6 +4,7 @@ import {
   confirmAtDelivery,
   confirmAtPickup,
   completeDeliveryWithOtp,
+  createOrderPayouts,
   notifyArrivingDelivery,
   notifyArrivingPickup,
 } from "../lib/api";
@@ -716,6 +717,7 @@ export function OrderPage() {
                     onClick={() =>
                       runAction("delivery-otp", async () => {
                         await completeDeliveryWithOtp(session!, order.id, deliveryOtp);
+                        await createOrderPayouts(session!, order.id);
                         setDeliveryOtp("");
                         pushToast("success", "Delivery OTP match ho gaya. Order completed.");
                         setActiveOrderId(null);
