@@ -5,7 +5,7 @@ import { fetchOrderBundle } from "../lib/data";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCountdown } from "../hooks/useCountdown";
-import { countQuoteItems, formatCurrency, quoteItemsSummary } from "../lib/format";
+import { countQuoteItems, formatCurrency, parseQuoteItems, quoteItemsSummary } from "../lib/format";
 import { getErrorMessage, isAuthError } from "../lib/errorHandling";
 import { distanceBetweenMeters, openGoogleMaps } from "../lib/location";
 import { PageHeader } from "../components/shared/PageHeader";
@@ -24,6 +24,7 @@ export function RequestPage() {
   const [bundle, setBundle] = useState<OrderBundle | null>(null);
   const [loading, setLoading] = useState(!request);
   const [acting, setActing] = useState<"accept" | "decline" | null>(null);
+  const requestItems = useMemo(() => parseQuoteItems(request?.items), [request?.items]);
 
   useEffect(() => {
     if (request || !orderId) {
@@ -201,12 +202,12 @@ export function RequestPage() {
           <div className="card__header">
             <div>
               <p className="eyebrow">order summary</p>
-              <h2 className="section-title">{quoteItemsSummary(request.items)}</h2>
+              <h2 className="section-title">{quoteItemsSummary(requestItems)}</h2>
             </div>
-            <span className="pill">{countQuoteItems(request.items)} items</span>
+            <span className="pill">{countQuoteItems(requestItems)} items</span>
           </div>
           <ul className="list">
-            {request.items.map((item, index) => (
+            {requestItems.map((item, index) => (
               <li key={`${item.part_name ?? item.name ?? "item"}-${index}`} className="list-item">
                 <div className="row row--top">
                   <div>

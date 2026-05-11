@@ -85,31 +85,81 @@ export function safeJsonParse<T>(value: unknown, fallback: T): T {
   }
 }
 
+function isQuoteItemRecord(source: unknown): source is QuoteItem {
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    return false;
+  }
+
+  const record = source as Record<string, unknown>;
+  return "part_name" in record || "name" in record || "quantity" in record || "qty" in record;
+}
+
 export function parseQuoteItems(source: unknown): QuoteItem[] {
   if (Array.isArray(source)) {
-    return source as QuoteItem[];
+    return source
+      .flatMap((item) => {
+        if (Array.isArray(item)) {
+          return parseQuoteItems(item);
+        }
+
+        if (isQuoteItemRecord(item)) {
+          return [item];
+        }
+
+        if (item && typeof item === "object") {
+          return parseQuoteItems(item);
+        }
+
+        return [];
+      });
   }
 
   if (typeof source === "string") {
-    return safeJsonParse<QuoteItem[]>(source, []);
+    return parseQuoteItems(safeJsonParse<unknown>(source, []));
+  }
+
+  if (source && typeof source === "object") {
+    const record = source as Record<string, unknown>;
+
+    if (Array.isArray(record.items)) {
+      return record.items as QuoteItem[];
+    }
+
+    if (Array.isArray(record.quote_items)) {
+      return record.quote_items as QuoteItem[];
+    }
+
+    if (Array.isArray(record.quoteDetails)) {
+      return record.quoteDetails as QuoteItem[];
+    }
+
+    if (Array.isArray(record.quote_details)) {
+      return record.quote_details as QuoteItem[];
+    }
+
+    if (isQuoteItemRecord(record)) {
+      return [record as QuoteItem];
+    }
   }
 
   return [];
 }
 
 export function quoteItemsSummary(items: QuoteItem[]) {
-  if (!items.length) {
+  const normalizedItems = parseQuoteItems(items);
+
+  if (!normalizedItems.length) {
     return "Items detail pending";
   }
 
-  return items
+  return normalizedItems
     .slice(0, 3)
     .map((item) => item.part_name ?? item.name ?? "Part")
     .join(", ");
 }
 
 export function countQuoteItems(items: QuoteItem[]) {
-  return items.reduce((sum, item) => sum + (item.quantity ?? item.qty ?? 1), 0);
+  return parseQuoteItems(items).reduce((sum, item) => sum + Number(item.quantity ?? item.qty ?? 1), 0);
 }
 
 export function formatDurationHours(hours?: number | null) {

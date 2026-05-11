@@ -15,6 +15,7 @@ import {
   countQuoteItems,
   formatCurrency,
   metersToHuman,
+  parseQuoteItems,
   quoteItemsSummary,
   shortOrderId,
 } from "../lib/format";
@@ -65,6 +66,7 @@ export function OrderPage() {
   const [actioning, setActioning] = useState<string | null>(null);
 
   const order = bundle?.order;
+  const quoteItems = useMemo(() => parseQuoteItems(bundle?.quoteItems), [bundle?.quoteItems]);
   const dealerTarget =
     order?.dealer_lat != null && order?.dealer_lng != null
       ? { lat: order.dealer_lat, lng: order.dealer_lng }
@@ -159,12 +161,12 @@ export function OrderPage() {
   }, [orderId, riderItemsConfirmed]);
 
   useEffect(() => {
-    if (bundle?.quoteItems?.length) {
+    if (quoteItems.length) {
       setCheckedItems((current) =>
-        current.length ? current : bundle.quoteItems.map((_, index) => index),
+        current.length ? current : quoteItems.map((_, index) => index),
       );
     }
-  }, [bundle?.quoteItems]);
+  }, [quoteItems]);
 
   const pickupReadyForPhoto = riderItemsConfirmed;
   const pickupPhotoSubmitted = Boolean(order?.pickup_photo_id);
@@ -400,10 +402,10 @@ export function OrderPage() {
             <div>
               <p className="eyebrow">active order</p>
               <h2 className="section-title" style={{ fontSize: "1.2rem" }}>
-                {quoteItemsSummary(bundle.quoteItems)}
+                {quoteItemsSummary(quoteItems)}
               </h2>
             </div>
-            <span className="pill">{countQuoteItems(bundle.quoteItems)} items</span>
+            <span className="pill">{countQuoteItems(quoteItems)} items</span>
           </div>
           <p className="section-copy">
             {bundle.dealer?.shop_name ?? bundle.dealer?.name ?? "Dealer"} →{" "}
@@ -519,7 +521,7 @@ export function OrderPage() {
                     </span>
                   </div>
                   <ul className="list">
-                    {bundle.quoteItems.map((item, index) => {
+                    {quoteItems.map((item, index) => {
                       const checked = checkedItems.includes(index);
                       return (
                         <li className="list-item" key={`${item.part_name ?? item.name ?? "item"}-${index}`}>
@@ -549,15 +551,15 @@ export function OrderPage() {
                     className="button button--primary"
                     disabled={
                       riderItemsConfirmed ||
-                      checkedItems.length !== bundle.quoteItems.length ||
+                      checkedItems.length !== quoteItems.length ||
                       step.state === "locked"
                     }
                     onClick={() => {
                       setRiderItemsConfirmed(true);
-                      pushToast("success", `Maine ${bundle.quoteItems.length} items le liye hain`);
+                      pushToast("success", `Maine ${quoteItems.length} items le liye hain`);
                     }}
                   >
-                    Maine {bundle.quoteItems.length} items le liye hain
+                    Maine {quoteItems.length} items le liye hain
                   </button>
                 </div>
               ) : null}
