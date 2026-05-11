@@ -48,6 +48,10 @@ type OrderRow = {
   delivery_otp: string | null;
 };
 
+type QuoteDetailsPayload = {
+  discount_amount?: string | number | null;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -111,6 +115,26 @@ function formatMoney(value: unknown) {
 
 function payoutAmount(value: unknown) {
   const amount = Number(value ?? 0);
+  return Math.round((Number.isFinite(amount) ? amount : 0) * 100) / 100;
+}
+
+function parseDiscountAmount(source: unknown) {
+  if (!source) return 0;
+
+  let record = source;
+  if (typeof source === "string") {
+    try {
+      record = JSON.parse(source);
+    } catch {
+      return 0;
+    }
+  }
+
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return 0;
+  }
+
+  const amount = Number((record as QuoteDetailsPayload).discount_amount ?? 0);
   return Math.round((Number.isFinite(amount) ? amount : 0) * 100) / 100;
 }
 
@@ -409,9 +433,20 @@ serve(async (req) => {
       8000,
     );
 
+    const { data: quote } = order.quote_id
+      ? await withTimeout(
+          supabase
+            .from("quotes")
+            .select("quote_details")
+            .eq("id", order.quote_id)
+            .maybeSingle<{ quote_details: unknown }>(),
+          8000,
+        )
+      : { data: null };
+
     const riderFee = formatMoney(order.delivery_fee);
     const dealerAmount = formatMoney(order.amount ?? order.total_amount);
-    const mechanicDiscountPayout = formatMoney(order.platform_fee);
+    const mechanicPayoutAmount = formatMoney(parseDiscountAmount(quote?.quote_details));
     const dealerName = dealer?.shop_name || dealer?.name || "Dealer";
     const shortOrderId = order.id.slice(0, 8).toUpperCase();
 
@@ -430,7 +465,7 @@ serve(async (req) => {
     const mechanicMessage =
       `✅ Order completed!\n\n` +
       `Order: ${shortOrderId}\n` +
-      `Aapka MRP discount/payout amount ${mechanicDiscountPayout} auto-payout ke liye mark ho gaya hai. Amount jaldi account mein process hoga.`;
+      `Aapka payout amount ${mechanicPayoutAmount} settlement ke liye mark ho gaya hai. Amount jaldi process hoga.`;
 
     const mechanicReviewMessage =
       `Dealer review dein:\n\n` +

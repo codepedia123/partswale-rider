@@ -52,7 +52,24 @@ export interface QuoteItem {
   year?: string | number;
   quantity?: number;
   qty?: number;
-  price?: number;
+  price?: number | string;
+  part_type?: string;
+  stock_status?: string;
+  line_total?: number | string;
+  other_brand_details?: {
+    brand_name?: string;
+    bike_model_name?: string;
+    bike_model_year?: string;
+    bike_model_variant?: string;
+  } | null;
+}
+
+export interface QuoteDetailsPayload {
+  discount_input?: string;
+  discount_amount?: number | string | null;
+  gross_total?: number | string | null;
+  final_total?: number | string | null;
+  items?: QuoteItem[];
 }
 
 export interface OrderRecord {
@@ -128,14 +145,14 @@ export interface IncomingRequest {
   mechanicLng?: number | null;
   estimatedDistanceKm?: number | null;
   deliveryFee?: number | null;
-  items: QuoteItem[];
+  items: QuoteItem[] | QuoteDetailsPayload | string | unknown;
 }
 
 export interface DeliveryHistoryItem {
   id: string;
   deliveryConfirmedAt?: string | null;
   riderPaidAt?: string | null;
-  quoteDetails: QuoteItem[];
+  quoteDetails: QuoteItem[] | QuoteDetailsPayload | string | unknown;
   mechanicDistrict?: string | null;
   dealerName?: string | null;
   deliveryFee?: number | null;

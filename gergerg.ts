@@ -263,7 +263,13 @@ async function fetchItemsSummary(supabase: ReturnType<typeof createClient>, quot
   if (typeof details === "string") {
     try { details = JSON.parse(details); } catch { return ""; }
   }
-  return Array.isArray(details) ? buildItemsSummary(details) : "";
+  if (Array.isArray(details)) {
+    return buildItemsSummary(details);
+  }
+  if (details && typeof details === "object" && Array.isArray((details as { items?: unknown }).items)) {
+    return buildItemsSummary((details as { items: any[] }).items);
+  }
+  return "";
 }
 
 async function notifyAndSaveConversation(

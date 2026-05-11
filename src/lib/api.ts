@@ -182,6 +182,13 @@ function normalizeActiveOrder(raw: unknown): DashboardData["activeOrder"] {
   };
 }
 
+function normalizeIncomingRequest(raw: IncomingRequest): IncomingRequest {
+  return {
+    ...raw,
+    items: parseQuoteItems(raw?.items),
+  };
+}
+
 export function sendOtp(phone: string) {
   return edgeRequest("rider-send-otp", {
     method: "POST",
@@ -240,7 +247,8 @@ export async function getDashboard(session: RiderSession) {
 
   return {
     activeOrder: normalizeActiveOrder(topLevel.active_order ?? data.active_order ?? null),
-    incomingRequests: (topLevel.incoming_requests ?? data.incoming_requests ?? []) as IncomingRequest[],
+    incomingRequests: ((topLevel.incoming_requests ?? data.incoming_requests ?? []) as IncomingRequest[])
+      .map(normalizeIncomingRequest),
     stats: {
       deliveriesToday: (topLevel.today_stats?.deliveries_today ?? data.today_stats?.deliveries_today ?? 0) as number,
       earningsToday: (topLevel.today_stats?.earnings_today ?? data.today_stats?.earnings_today ?? 0) as number,

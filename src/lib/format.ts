@@ -145,7 +145,7 @@ export function parseQuoteItems(source: unknown): QuoteItem[] {
   return [];
 }
 
-export function quoteItemsSummary(items: QuoteItem[]) {
+export function quoteItemsSummary(items: unknown) {
   const normalizedItems = parseQuoteItems(items);
 
   if (!normalizedItems.length) {
@@ -158,7 +158,7 @@ export function quoteItemsSummary(items: QuoteItem[]) {
     .join(", ");
 }
 
-export function countQuoteItems(items: QuoteItem[]) {
+export function countQuoteItems(items: unknown) {
   return parseQuoteItems(items).reduce((sum, item) => sum + Number(item.quantity ?? item.qty ?? 1), 0);
 }
 
